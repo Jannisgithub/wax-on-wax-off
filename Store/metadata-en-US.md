@@ -5,6 +5,7 @@
 - **Name:** Wax on/Wax off
 - **Subtitle:** Safe cache and disk cleanup
 - **Bundle ID:** `com.jannis.waxonwaxoff`
+- **Apple ID:** `6781851327`
 - **SKU:** `WAXONWAXOFF-MAC-001`
 - **Primary language:** English (U.S.)
 - **Primary category:** Utilities
@@ -72,6 +73,6 @@ Initial release with LOW, MID, HIGH, and LEFTOVERS cleanup modes; read-only anal
 
 ## Release
 
-- Availability: Worldwide, excluding storefronts that require additional local registrations not held by the developer.
+- Availability: All 175 App Store countries and regions.
 - Release method: Manual release after approval.
 - Phased release: Not applicable to the initial version.
