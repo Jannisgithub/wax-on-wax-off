@@ -227,6 +227,9 @@ final class AppModel: ObservableObject {
     private func configureScreenshotStateIfRequested() {
         guard let scene = ProcessInfo.processInfo.environment["WAX_SCREENSHOT_SCENE"] else { return }
         switch scene {
+        case "analyzing":
+            selectedMode = .mid
+            phase = .analyzing
         case "mid-review":
             selectedMode = .mid
             candidates = [

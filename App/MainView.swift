@@ -109,13 +109,12 @@ struct MainView: View {
     }
 
     private func progressContent(title: String, detail: String) -> some View {
-        VStack(spacing: 18) {
-            ProgressView()
-                .controlSize(.large)
-                .tint(ink)
-            Text(title).fontWeight(.bold)
-            Text(detail).foregroundStyle(muted)
-        }
+        CleaningActivityView(
+            title: title,
+            detail: detail,
+            ink: ink,
+            muted: muted
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(18)
         .retroPanel(panel: panel, ink: ink)
