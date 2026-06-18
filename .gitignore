@@ -1,0 +1,16 @@
+.DS_Store
+DerivedData/
+build/
+*.xcarchive
+*.ipa
+*.pkg
+*.zip
+xcuserdata/
+*.xcuserstate
+Mac Cleanup Assistant.app/
+Mac Cleanup Assistant 2.app/
+Store/Screenshots/raw/
+Mac Cleanup Assistant.command
+NativeApp/
+build_app_bundle.py
+mac_cleanup_assistant.py
