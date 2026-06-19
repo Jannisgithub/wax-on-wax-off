@@ -38,7 +38,7 @@ targets:
         PRODUCT_NAME: WaxOnWaxOff
         INFOPLIST_FILE: App/Resources/Info.plist
         MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "4"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         COMBINE_HIDPI_IMAGES: YES
     scheme:
