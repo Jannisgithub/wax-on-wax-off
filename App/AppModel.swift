@@ -12,6 +12,7 @@ final class AppModel: ObservableObject {
 
     private let accessManager = FolderAccessManager()
     private let engine = CleanupEngine()
+    private let minimumActivityDuration: TimeInterval = 2.6
     private var authorizedHome: URL?
 
     init() {
@@ -98,10 +99,12 @@ final class AppModel: ObservableObject {
         result = nil
         let mode = selectedMode
         let runningIDs = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        let earliestReviewDate = Date().addingTimeInterval(minimumActivityDuration)
 
         Task {
             let report = await engine.analyze(mode: mode, home: home, runningBundleIDs: runningIDs)
             home.stopAccessingSecurityScopedResource()
+            await wait(until: earliestReviewDate)
             guard selectedMode == mode else { return }
             candidates = report.candidates
             selectedCandidateIDs = Set(report.candidates.filter(\.defaultSelected).map(\.id))
@@ -144,6 +147,7 @@ final class AppModel: ObservableObject {
         }
 
         phase = .cleaning
+        let earliestResultDate = Date().addingTimeInterval(minimumActivityDuration)
         Task {
             let deleteCandidates = selected.filter {
                 if case .recycle = $0.operation { return false }
@@ -164,10 +168,17 @@ final class AppModel: ObservableObject {
                 )
             }
             home.stopAccessingSecurityScopedResource()
+            await wait(until: earliestResultDate)
             result = cleanupResult
             warnings += cleanupResult.warnings
             phase = .finished
         }
+    }
+
+    private func wait(until date: Date) async {
+        let remaining = date.timeIntervalSinceNow
+        guard remaining > 0 else { return }
+        try? await Task.sleep(for: .seconds(remaining))
     }
 
     private func confirmationText(for selected: [CleanupCandidate]) -> String {

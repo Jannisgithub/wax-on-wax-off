@@ -9,13 +9,14 @@ struct MainView: View {
     private let muted = Color(red: 0.55, green: 0.55, blue: 0.52)
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             header
             modePicker
             content
+                .layoutPriority(1)
             primaryButton
         }
-        .padding(16)
+        .padding(12)
         .frame(minWidth: 720, minHeight: 540)
         .background(background)
         .foregroundStyle(ink)
@@ -41,12 +42,13 @@ struct MainView: View {
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(model.phase == .cleaning || model.phase == .analyzing ? ink : muted)
         }
-        .padding(14)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
         .retroPanel(panel: panel, ink: ink)
     }
 
     private var modePicker: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("CHOOSE ONE CLEANUP MODE")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
             HStack(spacing: 8) {
@@ -56,7 +58,7 @@ struct MainView: View {
                     } label: {
                         Text(mode.title)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 32)
+                            .frame(height: 28)
                     }
                     .buttonStyle(RetroModeButtonStyle(
                         selected: model.selectedMode == mode,
@@ -70,8 +72,10 @@ struct MainView: View {
             Text(model.selectedMode.summary)
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(muted)
+                .lineLimit(1)
         }
-        .padding(14)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
         .retroPanel(panel: panel, ink: ink)
     }
 
@@ -127,23 +131,29 @@ struct MainView: View {
                 Spacer()
                 Text("SELECTED \(model.selectedBytes.fileSizeText)").foregroundStyle(muted)
             }
-            if model.candidates.isEmpty {
+            if model.candidates.isEmpty && model.warnings.isEmpty {
                 Text("Nothing eligible was found for this mode.")
                     .foregroundStyle(muted)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 7) {
+                    LazyVStack(alignment: .leading, spacing: 7) {
                         ForEach(model.candidates) { candidate in
                             candidateRow(candidate)
                         }
+                        if !model.candidates.isEmpty && !model.warnings.isEmpty {
+                            Divider().overlay(muted)
+                                .padding(.vertical, 2)
+                        }
+                        ForEach(model.warnings, id: \.self) { warning in
+                            Text("NOTE / \(warning)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }
-            ForEach(model.warnings, id: \.self) { warning in
-                Text("NOTE / \(warning)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(muted)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -179,7 +189,7 @@ struct MainView: View {
                     Text(candidate.size.fileSizeText).fontWeight(.bold)
                 }
             }
-            .padding(10)
+            .padding(8)
             .background(selected ? ink.opacity(0.08) : background.opacity(0.25))
             .overlay(Rectangle().stroke(selected ? ink : muted.opacity(0.7), lineWidth: 1))
             .contentShape(Rectangle())
@@ -265,7 +275,7 @@ private struct RetroPrimaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(size: 16, weight: .black, design: .monospaced))
             .frame(maxWidth: .infinity)
-            .frame(height: 48)
+            .frame(height: 44)
             .foregroundStyle(background)
             .background(ink)
             .overlay(Rectangle().stroke(ink, lineWidth: 1))
