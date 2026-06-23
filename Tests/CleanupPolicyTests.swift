@@ -8,6 +8,8 @@ final class CleanupPolicyTests: XCTestCase {
 
     func testMidAddsAppCachesWithoutDeveloperCaches() {
         let ids = Set(CleanupPolicy.targets(for: .mid).map(\.id))
+        XCTAssertTrue(ids.contains("chrome-disk-cache"))
+        XCTAssertTrue(ids.contains("spotify-disk-cache"))
         XCTAssertTrue(ids.contains("chrome-models"))
         XCTAssertFalse(ids.contains("xcode-derived"))
     }
@@ -22,7 +24,7 @@ final class CleanupPolicyTests: XCTestCase {
     func testModeAgeRules() {
         XCTAssertEqual(CleanupMode.low.ageDays, 30)
         XCTAssertEqual(CleanupMode.mid.ageDays, 14)
-        XCTAssertEqual(CleanupMode.high.ageDays, 7)
+        XCTAssertEqual(CleanupMode.high.ageDays, 14)
         XCTAssertEqual(CleanupMode.leftovers.ageDays, 45)
     }
 
@@ -96,6 +98,23 @@ final class CleanupPolicyTests: XCTestCase {
         )
         XCTAssertFalse(report.candidates.contains { $0.id == "xcode-derived" })
         XCTAssertTrue(report.warnings.contains { $0.contains("close the owning app") })
+    }
+
+    func testMidUsesNamedChromeCacheWithoutBroadCacheOverlap() async throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let cache = home.appendingPathComponent("Library/Caches/Google/Chrome", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let file = cache.appendingPathComponent("cache.bin")
+        try Data(repeating: 5, count: 4_096).write(to: file)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: -30 * 86_400)],
+            ofItemAtPath: file.path
+        )
+
+        let report = await CleanupEngine().analyze(mode: .mid, home: home, runningBundleIDs: [])
+        XCTAssertTrue(report.candidates.contains { $0.id == "chrome-disk-cache" })
+        XCTAssertFalse(report.candidates.contains { $0.id == "user-caches" })
     }
 
     private func temporaryHome() throws -> URL {

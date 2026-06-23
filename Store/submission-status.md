@@ -8,7 +8,7 @@
 - SKU: `WAXONWAXOFF-MAC-001`
 - Team: `QXUZR3C892`
 - Version: `1.0`
-- Status: Prepare for Submission
+- Status: Rejected by App Review on June 23, 2026; replacement build 14 prepared for Xcode Cloud upload
 
 ## Completed in App Store Connect
 
@@ -22,8 +22,7 @@
 
 ## Remaining Before Review
 
-1. Upload the five 2880 x 1800 screenshots from `Store/Screenshots/final/`.
-2. Enter the App Review contact first name, last name, phone number, and email. Do not commit these personal details to the repository.
-3. Install an App Store Connect-supported production Xcode and sign in with team `QXUZR3C892` so Xcode can create the distribution certificate and provisioning profile.
-4. Run `Scripts/archive_app_store.sh`, upload the exported build, and select it for version 1.0.
-5. Add the version for review, submit it, and manually release it after approval.
+1. Commit and push build 14 so Xcode Cloud can archive with Apple-hosted production Xcode.
+2. Select the new build for version 1.0 in App Store Connect after processing.
+3. Paste the updated 2.4.5(v) review note from `Store/review-notes.md`.
+4. Add the version for review, submit it, and manually release it after approval.

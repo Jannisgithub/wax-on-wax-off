@@ -17,7 +17,7 @@ enum CleanupMode: String, CaseIterable, Identifiable, Sendable {
         case .mid:
             "Baseline cleanup plus known app caches using a 14-day rule."
         case .high:
-            "Adds developer and package caches using a 7-day rule."
+            "Adds reviewed developer, package, and closed-app render caches."
         case .leftovers:
             "Inactive app data, reviewed individually and moved to Trash."
         }
@@ -27,7 +27,7 @@ enum CleanupMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .low: 30
         case .mid: 14
-        case .high: 7
+        case .high: 14
         case .leftovers: 45
         }
     }
@@ -39,11 +39,39 @@ enum CandidateRisk: String, Sendable {
     case review = "REVIEW"
 }
 
+struct DeleteFilesPlan: Sendable {
+    let urls: [URL]
+    let cutoff: Date
+    let scopeRoot: URL
+    let measurementRoot: URL
+    let ownerBundleIDs: Set<String>
+}
+
+struct DeleteTreePlan: Sendable {
+    let url: URL
+    let scopeRoot: URL
+    let analyzedSize: Int64
+    let analyzedModificationDate: Date
+    let ownerBundleIDs: Set<String>
+}
+
 enum CleanupOperation: Sendable {
-    case deleteFiles([URL], cutoff: Date)
-    case deleteTree(URL)
+    case deleteFiles(DeleteFilesPlan)
+    case deleteTree(DeleteTreePlan)
+    case deleteTrees([DeleteTreePlan], measurementRoot: URL)
     case recycle([URL])
     case recommendation
+}
+
+struct ReclaimEvidence: Sendable {
+    let cleanedAt: Date
+    let removedBytes: Int64
+    let retainedBytes: Int64
+
+    var retainedPercent: Int {
+        guard removedBytes > 0 else { return 0 }
+        return Int((Double(retainedBytes) / Double(removedBytes) * 100).rounded())
+    }
 }
 
 struct CleanupCandidate: Identifiable, Sendable {
@@ -55,6 +83,13 @@ struct CleanupCandidate: Identifiable, Sendable {
     let risk: CandidateRisk
     let defaultSelected: Bool
     let operation: CleanupOperation
+    var currentFootprint: Int64 = 0
+    var reclaimEvidence: ReclaimEvidence?
+
+    var isSelectable: Bool {
+        if case .recommendation = operation { return false }
+        return true
+    }
 }
 
 struct AnalysisReport: Sendable {
@@ -69,11 +104,51 @@ struct AnalysisReport: Sendable {
     }
 }
 
+enum CleanupDisposition: Sendable {
+    case deleted
+    case recycled
+    case skipped
+}
+
+struct CandidateCleanupOutcome: Sendable {
+    let candidateID: String
+    let removedBytes: Int64
+    let remainingFootprint: Int64
+    let disposition: CleanupDisposition
+}
+
 struct CleanupResult: Sendable {
     let removedBytes: Int64
+    let recycledBytes: Int64
     let removedItems: Int
+    let recycledItems: Int
     let skippedItems: Int
     let warnings: [String]
+    let outcomes: [CandidateCleanupOutcome]
+    let availableCapacityBefore: Int64?
+    let availableCapacityAfter: Int64?
+
+    init(
+        removedBytes: Int64,
+        recycledBytes: Int64 = 0,
+        removedItems: Int,
+        recycledItems: Int = 0,
+        skippedItems: Int,
+        warnings: [String],
+        outcomes: [CandidateCleanupOutcome] = [],
+        availableCapacityBefore: Int64? = nil,
+        availableCapacityAfter: Int64? = nil
+    ) {
+        self.removedBytes = removedBytes
+        self.recycledBytes = recycledBytes
+        self.removedItems = removedItems
+        self.recycledItems = recycledItems
+        self.skippedItems = skippedItems
+        self.warnings = warnings
+        self.outcomes = outcomes
+        self.availableCapacityBefore = availableCapacityBefore
+        self.availableCapacityAfter = availableCapacityAfter
+    }
 }
 
 enum AppPhase: Equatable {
@@ -91,4 +166,3 @@ extension Int64 {
         ByteCountFormatter.string(fromByteCount: self, countStyle: .file)
     }
 }
-

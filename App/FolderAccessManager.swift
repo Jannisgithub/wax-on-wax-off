@@ -5,6 +5,10 @@ import Foundation
 final class FolderAccessManager {
     private let bookmarkFileName = "authorized-home.bookmark"
 
+    init() {
+        UserDefaults.standard.removeObject(forKey: "authorized-project-root-relative-paths")
+    }
+
     func authorizedHome() -> URL? {
         guard let data = try? Data(contentsOf: bookmarkFileURL()) else { return nil }
         var stale = false
@@ -13,7 +17,7 @@ final class FolderAccessManager {
             options: [.withSecurityScope],
             relativeTo: nil,
             bookmarkDataIsStale: &stale
-        ) else { return nil }
+        ), isExpectedHomeSelection(url) else { return nil }
 
         if stale {
             try? saveBookmark(for: url)
@@ -22,22 +26,27 @@ final class FolderAccessManager {
     }
 
     func requestHomeFolder() -> URL? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
         let panel = NSOpenPanel()
         panel.title = "Allow cleanup access"
-        panel.message = "Choose your Home folder. The app only scans documented cache, log, developer, and leftover locations inside the folder you approve."
-        panel.prompt = "Allow Access"
+        panel.message = "Choose the signed-in user's Home folder named \(home.lastPathComponent). The app rejects /Users, system folders, and other user folders, and never asks for administrator privileges."
+        panel.prompt = "Use Home Folder"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
-        panel.directoryURL = URL(fileURLWithPath: "/Users", isDirectory: true)
+        panel.directoryURL = home.deletingLastPathComponent()
 
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
-        guard FileManager.default.fileExists(atPath: url.appendingPathComponent("Library").path) else {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed { url.stopAccessingSecurityScopedResource() }
+        }
+        guard isExpectedHomeSelection(url) else {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Choose your Home folder"
-            alert.informativeText = "The selected folder must contain your Library folder."
+            alert.informativeText = "Choose the current signed-in user's Home folder. System roots, /Users, lookalike folders, and other user folders are not accepted."
             alert.runModal()
             return nil
         }
@@ -54,6 +63,20 @@ final class FolderAccessManager {
 
     func resetAuthorization() {
         try? FileManager.default.removeItem(at: bookmarkFileURL())
+    }
+
+    func isExpectedHomeSelection(_ url: URL) -> Bool {
+        let selectedPath = dataVolumeNormalizedPath(url.standardizedFileURL.path)
+        let currentHomePath = dataVolumeNormalizedPath(
+            FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        )
+        return selectedPath == currentHomePath
+    }
+
+    private func dataVolumeNormalizedPath(_ path: String) -> String {
+        let prefix = "/System/Volumes/Data"
+        guard path.hasPrefix(prefix + "/") else { return path }
+        return String(path.dropFirst(prefix.count))
     }
 
     private func saveBookmark(for url: URL) throws {
@@ -76,5 +99,5 @@ final class FolderAccessManager {
             .appendingPathComponent("WaxOnWaxOff", isDirectory: true)
             .appendingPathComponent(bookmarkFileName)
     }
-}
 
+}

@@ -16,7 +16,7 @@
 
 ## Promotional Text
 
-Choose LOW, MID, HIGH, or LEFTOVERS. See what can be reclaimed, review every item, and remove only what you approve. Everything stays on your Mac.
+Choose LOW, MID, HIGH, or LEFTOVERS. Review exact candidates, safety checks, and local reclaim history. Remove only what you approve. Everything stays on your Mac.
 
 ## Keywords
 
@@ -31,13 +31,17 @@ Wax on/Wax off helps you reclaim storage without turning cleanup into guesswork.
 FOUR CLEAR MODES
 
 • LOW finds old caches, logs, and crash reports using a conservative 30-day rule.
-• MID adds known re-downloadable app caches using a 14-day rule.
-• HIGH adds developer and package caches using a 7-day rule, with an extra typed confirmation.
+• MID adds known re-downloadable app caches using a 14-day rule, including closed-app Chrome and Spotify disk caches while preserving profiles and persistent storage.
+• HIGH adds developer/package caches, closed-app render caches, and reviewed installers. Every HIGH-only action starts unchecked, and MID is recommended when the additional immediate cleanup is under 1 GB.
 • LEFTOVERS finds old app data that no longer matches an installed app. Nothing is preselected, and approved items move to Trash.
 
 REVIEW BEFORE REMOVE
 
-Analysis never deletes files. Every result shows its category, risk level, item count, and estimated size. You remain in control of the final selection.
+Analysis never deletes files. Every result shows its category, risk level, item count, estimated size, and available local cleanup history. HIGH-only caches, installers, and incomplete downloads start unchecked.
+
+PROVEN CLEAN MEMORY
+
+After a direct cleanup, the app stores a small local receipt with aggregate sizes and a hashed candidate ID. On a later scan it can show how much remains reclaimed. Results distinguish permanently deleted bytes from items moved to Trash and show the system-reported available-space change.
 
 BUILT FOR SAFETY
 
@@ -45,8 +49,10 @@ BUILT FOR SAFETY
 • Revalidates paths immediately before cleanup.
 • Rejects symlinked paths and anything outside the approved folder.
 • Skips known app caches while the owning app is open.
+• Never scans or deletes project folders.
+• Moves approved old installers, partial downloads, and leftovers to Trash.
 • Keeps personal documents and protected system files out of cleanup plans.
-• Leaves Xcode.app, Trash, and Time Machine snapshots as manual recommendations.
+• Leaves device backups, Xcode archives/runtimes, AI models, Docker data, Trash, and Time Machine snapshots as manual recommendations.
 
 PRIVATE BY DESIGN
 
@@ -56,7 +62,7 @@ Requires macOS 14 or later.
 
 ## Version 1.0 “What’s New”
 
-Initial release with LOW, MID, HIGH, and LEFTOVERS cleanup modes; read-only analysis; exact review; sandboxed folder access; and confirmation before every change.
+Initial release with LOW, MID, HIGH, and LEFTOVERS; read-only analysis; an unchecked HIGH approval queue; local reclaim memory; sandboxed folder access; and confirmation before every change.
 
 ## URLs
 

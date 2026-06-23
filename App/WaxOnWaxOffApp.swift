@@ -16,8 +16,12 @@ struct WaxOnWaxOffApp: App {
                 Button("Reset Folder Access") {
                     model.resetFolderAccess()
                 }
+                .disabled(model.phase == .analyzing || model.phase == .cleaning)
+                Button("Reset Cleanup Memory") {
+                    model.resetCleanupMemory()
+                }
+                .disabled(model.phase == .analyzing || model.phase == .cleaning)
             }
         }
     }
 }
-

@@ -17,7 +17,11 @@
     </header>
     <section>
       <h2>Simple by design</h2>
-      <p>LOW handles old baseline caches and logs. MID adds known re-downloadable app caches. HIGH adds authorized developer caches with an extra confirmation. LEFTOVERS keeps every item unselected until you choose it and moves approved items to Trash.</p>
+      <p>LOW handles old baseline caches and logs. MID adds known re-downloadable app caches, including closed-app Chrome and Spotify disk caches while preserving profiles and persistent storage. HIGH adds package caches, closed-app render caches, and reviewed installers; every HIGH-only action starts unchecked, and MID is recommended when the extra immediate cleanup is under 1 GB. LEFTOVERS keeps every item unselected until you choose it and moves approved items to Trash.</p>
+    </section>
+    <section>
+      <h2>Measured, fixed locations</h2>
+      <p>The app limits cleanup to documented cache locations and never scans project folders. Cleanup memory shows how much of a previous direct deletion remains reclaimed, using only local aggregate metadata.</p>
     </section>
     <section>
       <h2>Private by default</h2>
@@ -29,4 +33,3 @@
   </main>
 </body>
 </html>
-

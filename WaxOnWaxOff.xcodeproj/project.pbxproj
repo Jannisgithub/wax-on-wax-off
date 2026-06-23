@@ -19,6 +19,8 @@
 		CD847A80DAF74E04F9A6E09C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 521F233411067EE364A9A1E9 /* Assets.xcassets */; };
 		E2F849704F0599A362BD5A0C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = DDF3D568E677DBE6E7AC3CFC /* PrivacyInfo.xcprivacy */; };
 		E7E0288592E8BB0CE7C7BCE3 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E9825DD43E53392FB4C546 /* AppModel.swift */; };
+		ED311328F69B00783515B25C /* CleanupExpansionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4837109289B519CD11CD4D90 /* CleanupExpansionTests.swift */; };
+		ED4BA28F66923CDD86C52499 /* ReclaimHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6044217A38B24DC39A522AEC /* ReclaimHistoryStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -36,9 +38,11 @@
 		1C7A6324B83F032E3EE04348 /* WaxOnWaxOffApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaxOnWaxOffApp.swift; sourceTree = "<group>"; };
 		30CB6838F47446B4AA4BBAFE /* CleanupPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupPolicy.swift; sourceTree = "<group>"; };
 		41FD39401CFE73E8774075C7 /* FolderAccessManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderAccessManager.swift; sourceTree = "<group>"; };
+		4837109289B519CD11CD4D90 /* CleanupExpansionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupExpansionTests.swift; sourceTree = "<group>"; };
 		4B1E6202FC797EC64A8DB54A /* CleaningActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleaningActivityView.swift; sourceTree = "<group>"; };
 		521F233411067EE364A9A1E9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		55E9825DD43E53392FB4C546 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		6044217A38B24DC39A522AEC /* ReclaimHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReclaimHistoryStore.swift; sourceTree = "<group>"; };
 		90EE8B226D32F5CFC2993D78 /* WaxOnWaxOffTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WaxOnWaxOffTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A5EECAA68BE96AF5B0A5771C /* WaxOnWaxOff.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WaxOnWaxOff.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B20EE3770E17A48FA22D58D7 /* CleanupEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupEngine.swift; sourceTree = "<group>"; };
@@ -68,6 +72,7 @@
 				41FD39401CFE73E8774075C7 /* FolderAccessManager.swift */,
 				16C3131B21BD37A815C0A345 /* MainView.swift */,
 				F4037A0BF2B4182F11ACE823 /* Models.swift */,
+				6044217A38B24DC39A522AEC /* ReclaimHistoryStore.swift */,
 				FAAFAA6590D1E6FDE01B000D /* ScreenshotCapture.swift */,
 				1C7A6324B83F032E3EE04348 /* WaxOnWaxOffApp.swift */,
 				1C658006B3D5B788FB1054EA /* Resources */,
@@ -96,6 +101,7 @@
 		D989590D687A1707F3E8C50C /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				4837109289B519CD11CD4D90 /* CleanupExpansionTests.swift */,
 				F5E1B123E151BAB6CE39DEF3 /* CleanupPolicyTests.swift */,
 			);
 			path = Tests;
@@ -196,6 +202,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				ED311328F69B00783515B25C /* CleanupExpansionTests.swift in Sources */,
 				73951EAD29D71098DBC0ECFC /* CleanupPolicyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -211,6 +218,7 @@
 				1E2AF5E6CC37188EF203DC50 /* FolderAccessManager.swift in Sources */,
 				09A619A336C91E522CEEFCF8 /* MainView.swift in Sources */,
 				3F2F7A8629C777DC893DB9BC /* Models.swift in Sources */,
+				ED4BA28F66923CDD86C52499 /* ReclaimHistoryStore.swift in Sources */,
 				6DAE75EDCD9141D3A00A3AC5 /* ScreenshotCapture.swift in Sources */,
 				6F4A9156E6FFC2F90D5D6AFD /* WaxOnWaxOffApp.swift in Sources */,
 			);
@@ -233,7 +241,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/Resources/WaxOnWaxOff.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 14;
 				INFOPLIST_FILE = App/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -269,7 +277,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/Resources/WaxOnWaxOff.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 14;
 				INFOPLIST_FILE = App/Resources/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

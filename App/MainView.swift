@@ -17,7 +17,7 @@ struct MainView: View {
             primaryButton
         }
         .padding(12)
-        .frame(minWidth: 720, minHeight: 540)
+        .frame(minWidth: 720, minHeight: 580)
         .background(background)
         .foregroundStyle(ink)
         .font(.system(.body, design: .monospaced))
@@ -85,11 +85,11 @@ struct MainView: View {
         case .idle:
             idleContent
         case .analyzing:
-            progressContent(title: "ANALYZING AUTHORIZED LOCATIONS", detail: "Nothing is being deleted.")
+            progressContent(mode: .analyzing, title: "ANALYZING AUTHORIZED LOCATIONS", detail: "Nothing is being deleted.")
         case .review, .confirming:
             reviewContent
         case .cleaning:
-            progressContent(title: "REVALIDATING AND CLEANING", detail: "Changed or protected paths are skipped.")
+            progressContent(mode: .cleaning, title: "REVALIDATING AND CLEANING", detail: "Changed or protected paths are skipped.")
         case .finished:
             resultContent
         case let .failed(message):
@@ -112,8 +112,9 @@ struct MainView: View {
         .retroPanel(panel: panel, ink: ink)
     }
 
-    private func progressContent(title: String, detail: String) -> some View {
+    private func progressContent(mode: CleaningActivityMode, title: String, detail: String) -> some View {
         CleaningActivityView(
+            mode: mode,
             title: title,
             detail: detail,
             ink: ink,
@@ -163,7 +164,7 @@ struct MainView: View {
 
     private func candidateRow(_ candidate: CleanupCandidate) -> some View {
         let selected = model.selectedCandidateIDs.contains(candidate.id)
-        let selectable = candidate.risk != .review
+        let selectable = candidate.isSelectable
         return Button {
             if selectable { model.toggleCandidate(candidate.id) }
         } label: {
@@ -182,7 +183,13 @@ struct MainView: View {
                     Text(candidate.detail)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(muted)
-                        .lineLimit(2)
+                        .lineLimit(3)
+                    if let evidence = candidate.reclaimEvidence {
+                        Text(reclaimEvidenceText(evidence))
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(ink.opacity(0.78))
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
                 if candidate.size > 0 {
@@ -202,8 +209,15 @@ struct MainView: View {
         let result = model.result
         return VStack(alignment: .leading, spacing: 14) {
             Text("CLEANUP COMPLETE").font(.title2).fontWeight(.black)
-            Text("REMOVED / \((result?.removedBytes ?? 0).fileSizeText)")
-            Text("ITEMS / \(result?.removedItems ?? 0) completed, \(result?.skippedItems ?? 0) skipped")
+            Text("DELETED NOW / \((result?.removedBytes ?? 0).fileSizeText)")
+            if (result?.recycledBytes ?? 0) > 0 {
+                Text("MOVED TO TRASH / \((result?.recycledBytes ?? 0).fileSizeText) // NOT RECLAIMED UNTIL TRASH IS EMPTIED")
+                    .foregroundStyle(muted)
+            }
+            if let before = result?.availableCapacityBefore, let after = result?.availableCapacityAfter {
+                Text("AVAILABLE SPACE / \(before.fileSizeText) -> \(after.fileSizeText) (\((after - before).fileSizeText))")
+            }
+            Text("ITEMS / \(result?.removedItems ?? 0) deleted, \(result?.recycledItems ?? 0) trashed, \(result?.skippedItems ?? 0) skipped")
             if !model.warnings.isEmpty {
                 Divider().overlay(muted)
                 ForEach(model.warnings, id: \.self) { Text("NOTE / \($0)").foregroundStyle(muted) }
@@ -243,6 +257,11 @@ struct MainView: View {
         case .finished: "DONE"
         case .failed: "ACTION NEEDED"
         }
+    }
+
+    private func reclaimEvidenceText(_ evidence: ReclaimEvidence) -> String {
+        let days = max(0, Calendar.current.dateComponents([.day], from: evidence.cleanedAt, to: Date()).day ?? 0)
+        return "LOCAL MEMORY / \(evidence.retainedBytes.fileSizeText) STILL RECLAIMED (\(evidence.retainedPercent)%) • CLEANED \(days)D AGO"
     }
 }
 
