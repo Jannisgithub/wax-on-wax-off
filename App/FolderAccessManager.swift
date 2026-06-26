@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 @MainActor
@@ -26,7 +27,7 @@ final class FolderAccessManager {
     }
 
     func requestHomeFolder() -> URL? {
-        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
+        let home = realHomeDirectory().standardizedFileURL
         let panel = NSOpenPanel()
         panel.title = "Allow cleanup access"
         panel.message = "Choose the signed-in user's Home folder named \(home.lastPathComponent). The app rejects /Users, system folders, and other user folders, and never asks for administrator privileges."
@@ -68,9 +69,16 @@ final class FolderAccessManager {
     func isExpectedHomeSelection(_ url: URL) -> Bool {
         let selectedPath = dataVolumeNormalizedPath(url.standardizedFileURL.path)
         let currentHomePath = dataVolumeNormalizedPath(
-            FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+            realHomeDirectory().standardizedFileURL.path
         )
         return selectedPath == currentHomePath
+    }
+
+    private func realHomeDirectory() -> URL {
+        if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
+            return URL(fileURLWithPath: String(cString: dir))
+        }
+        return URL(fileURLWithPath: "/Users/\(NSUserName())")
     }
 
     private func dataVolumeNormalizedPath(_ path: String) -> String {

@@ -73,9 +73,7 @@ actor CleanupEngine {
                     currentFootprint: directorySize(url)
                 ))
             case .entireTree:
-                guard isOwnedByCurrentUserTree(url) else { continue }
-                let size = directorySize(url)
-                guard size > 0 else { continue }
+                guard let size = measureTreeIfOwnedByCurrentUser(url), size > 0 else { continue }
                 candidates.append(CleanupCandidate(
                     id: target.id,
                     label: target.label,
@@ -272,11 +270,10 @@ actor CleanupEngine {
                     enumerator.skipDescendants()
                     continue
                 }
-                guard isOwnedByCurrentUserTree(url) else {
+                guard let size = measureTreeIfOwnedByCurrentUser(url) else {
                     enumerator.skipDescendants()
                     continue
                 }
-                let size = directorySize(url)
                 if size > 0 {
                     plans.append(treePlan(
                         url: url,
@@ -428,11 +425,9 @@ actor CleanupEngine {
                       !bundleID.hasPrefix("com.apple."),
                       !installed.contains(bundleID),
                       ageDays(of: url, now: now) >= minimumAge,
-                      revalidate(url, inside: home),
-                      isOwnedByCurrentUserTree(url) else { continue }
+                      revalidate(url, inside: home) else { continue }
 
-                let size = directorySize(url)
-                guard size >= 1_000_000 else { continue }
+                guard let size = measureTreeIfOwnedByCurrentUser(url), size >= 1_000_000 else { continue }
                 candidates.append(CleanupCandidate(
                     id: "leftover-\(stableID(url.path))",
                     label: rawName,
@@ -503,8 +498,7 @@ actor CleanupEngine {
     private func validate(_ plan: DeleteTreePlan, runningBundleIDs: Set<String>) -> Bool {
         ownersAreClosed(plan.ownerBundleIDs, runningBundleIDs: runningBundleIDs)
             && revalidate(plan.url, inside: plan.scopeRoot)
-            && isOwnedByCurrentUserTree(plan.url)
-            && directorySize(plan.url) == plan.analyzedSize
+            && measureTreeIfOwnedByCurrentUser(plan.url) == plan.analyzedSize
             && modificationDate(of: plan.url) == plan.analyzedModificationDate
     }
 
@@ -664,6 +658,30 @@ actor CleanupEngine {
             }
         }
         return true
+    }
+
+    private func measureTreeIfOwnedByCurrentUser(_ url: URL) -> Int64? {
+        guard isOwnedByCurrentUser(url), !isSymbolicLink(url) else { return nil }
+        if !isDirectory(url) { return allocatedSize(of: url) }
+
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey]
+        guard let enumerator = fileManager.enumerator(
+            at: url,
+            includingPropertiesForKeys: Array(keys),
+            options: []
+        ) else { return nil }
+
+        var total: Int64 = 0
+        for case let item as URL in enumerator {
+            guard let values = try? item.resourceValues(forKeys: keys) else { return nil }
+            guard isOwnedByCurrentUser(item), values.isSymbolicLink != true else {
+                return nil
+            }
+            if values.isRegularFile == true {
+                total += Int64(values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0)
+            }
+        }
+        return total
     }
 
     private func isSafe(_ url: URL, inside root: URL) -> Bool {
