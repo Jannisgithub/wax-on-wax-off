@@ -85,7 +85,7 @@ struct MainView: View {
         case .idle:
             idleContent
         case .analyzing:
-            progressContent(mode: .analyzing, title: "ANALYZING AUTHORIZED LOCATIONS", detail: "Nothing is being deleted.")
+            progressContent(mode: .analyzing, title: "SCANNING CLEANUP ITEMS", detail: "Nothing is being deleted.")
         case .review, .confirming:
             reviewContent
         case .cleaning:
