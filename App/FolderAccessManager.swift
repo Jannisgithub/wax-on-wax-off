@@ -79,7 +79,7 @@ final class FolderAccessManager {
 
     private static func resolveAccountHomeDirectory() -> URL {
         let fallback = URL(fileURLWithPath: "/Users/\(NSUserName())", isDirectory: true)
-        let paths = [
+        let paths: [String?] = [
             passwordDatabaseHomeDirectory(),
             ProcessInfo.processInfo.environment["HOME"],
             NSHomeDirectory(),
@@ -119,13 +119,15 @@ final class FolderAccessManager {
     }
 
     private func sameFileSystemLocation(_ lhs: URL, _ rhs: URL) -> Bool {
-        var lhsInfo = stat()
-        var rhsInfo = stat()
-        guard Darwin.stat(lhs.path, &lhsInfo) == 0,
-              Darwin.stat(rhs.path, &rhsInfo) == 0 else {
+        guard let lhsAttributes = try? FileManager.default.attributesOfItem(atPath: lhs.path),
+              let rhsAttributes = try? FileManager.default.attributesOfItem(atPath: rhs.path),
+              let lhsVolume = lhsAttributes[.systemNumber] as? NSNumber,
+              let rhsVolume = rhsAttributes[.systemNumber] as? NSNumber,
+              let lhsFile = lhsAttributes[.systemFileNumber] as? NSNumber,
+              let rhsFile = rhsAttributes[.systemFileNumber] as? NSNumber else {
             return false
         }
-        return lhsInfo.st_dev == rhsInfo.st_dev && lhsInfo.st_ino == rhsInfo.st_ino
+        return lhsVolume == rhsVolume && lhsFile == rhsFile
     }
 
     private func saveBookmark(for url: URL) throws {

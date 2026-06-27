@@ -4,11 +4,11 @@ Wax on/Wax off is a local, sandboxed macOS cleanup utility. It contains no login
 
 ## Guideline 2.4.5(v) response
 
-Build 16 removes any path that could cause administrator authentication. The first-run folder picker accepts only the signed-in user account Home folder and rejects /Users, system roots, lookalike folders, and other user folders. Cleanup analysis and apply also skip files or folders that are not owned by the signed-in user, including items moved through NSWorkspace.recycle, so the app never asks for administrator privileges.
+Build 17 removes any path that could cause administrator authentication. The first-run folder picker accepts only the signed-in user account Home folder and rejects /Users, system roots, lookalike folders, and other user folders. Cleanup analysis and apply also skip files or folders that are not owned by the signed-in user, including items moved through NSWorkspace.recycle, so the app never asks for administrator privileges.
 
 ## Guideline 2.1(a) response
 
-Build 16 fixes the Home-folder recognition bug reported against build 5. The first-run picker now resolves the real signed-in account Home folder from the macOS account record and explicitly avoids using the app sandbox container `Data` directory as the expected Home folder. The selected folder is accepted when it matches the normalized account Home path, including `/System/Volumes/Data/Users/...` aliases, or the same filesystem identity. `/Users`, system roots, other user folders, and the app container remain rejected.
+Build 17 fixes the Home-folder recognition bug reported against build 5. The first-run picker now resolves the real signed-in account Home folder from the macOS account record and explicitly avoids using the app sandbox container `Data` directory as the expected Home folder. The selected folder is accepted when it matches the normalized account Home path, including `/System/Volumes/Data/Users/...` aliases, or the same filesystem identity. `/Users`, system roots, other user folders, and the app container remain rejected.
 
 ## Review flow
 
