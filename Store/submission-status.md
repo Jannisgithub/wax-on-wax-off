@@ -8,7 +8,7 @@
 - SKU: `WAXONWAXOFF-MAC-001`
 - Team: `QXUZR3C892`
 - Version: `1.0`
-- Status: Rejected by App Review on June 23, 2026; replacement build 14 prepared for Xcode Cloud upload
+- Status: Rejected by App Review on June 26, 2026 for Home-folder recognition in build 5; replacement build 16 prepared for Xcode Cloud upload
 
 ## Completed in App Store Connect
 
@@ -22,7 +22,7 @@
 
 ## Remaining Before Review
 
-1. Commit and push build 14 so Xcode Cloud can archive with Apple-hosted production Xcode.
+1. Commit and push build 16 so Xcode Cloud can archive with Apple-hosted production Xcode.
 2. Select the new build for version 1.0 in App Store Connect after processing.
-3. Paste the updated 2.4.5(v) review note from `Store/review-notes.md`.
+3. Paste the updated 2.1(a) and 2.4.5(v) review notes from `Store/review-notes.md`.
 4. Add the version for review, submit it, and manually release it after approval.

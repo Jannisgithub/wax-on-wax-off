@@ -166,6 +166,24 @@ final class CleanupExpansionTests: XCTestCase {
     }
 
     @MainActor
+    func testFolderAuthorizationIgnoresSandboxContainerDataHome() throws {
+        let manager = FolderAccessManager(
+            accountHomeDirectory: URL(fileURLWithPath: "/Users/reviewuser", isDirectory: true)
+        )
+        let realHome = URL(fileURLWithPath: "/Users/reviewuser", isDirectory: true)
+        let dataVolumeHome = URL(fileURLWithPath: "/System/Volumes/Data/Users/reviewuser", isDirectory: true)
+        let sandboxContainerData = URL(
+            fileURLWithPath: "/Users/reviewuser/Library/Containers/com.jannis.waxonwaxoff/Data",
+            isDirectory: true
+        )
+
+        XCTAssertTrue(manager.isExpectedHomeSelection(realHome))
+        XCTAssertTrue(manager.isExpectedHomeSelection(dataVolumeHome))
+        XCTAssertFalse(manager.isExpectedHomeSelection(sandboxContainerData))
+        XCTAssertFalse(manager.isExpectedHomeSelection(URL(fileURLWithPath: "/Users/Data", isDirectory: true)))
+    }
+
+    @MainActor
     func testReclaimHistoryCalculatesRetainedSpaceWithoutStoringPaths() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let historyURL = directory.appendingPathComponent("history.json")

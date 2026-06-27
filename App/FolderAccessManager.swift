@@ -5,8 +5,12 @@ import Foundation
 @MainActor
 final class FolderAccessManager {
     private let bookmarkFileName = "authorized-home.bookmark"
+    private let accountHomeDirectory: URL
 
-    init() {
+    init(accountHomeDirectory: URL? = nil) {
+        self.accountHomeDirectory = (
+            accountHomeDirectory ?? Self.resolveAccountHomeDirectory()
+        ).standardizedFileURL
         UserDefaults.standard.removeObject(forKey: "authorized-project-root-relative-paths")
     }
 
@@ -27,7 +31,7 @@ final class FolderAccessManager {
     }
 
     func requestHomeFolder() -> URL? {
-        let home = realHomeDirectory().standardizedFileURL
+        let home = accountHomeDirectory
         let panel = NSOpenPanel()
         panel.title = "Allow cleanup access"
         panel.message = "Choose the signed-in user's Home folder named \(home.lastPathComponent). The app rejects /Users, system folders, and other user folders, and never asks for administrator privileges."
@@ -67,24 +71,61 @@ final class FolderAccessManager {
     }
 
     func isExpectedHomeSelection(_ url: URL) -> Bool {
-        let selectedPath = dataVolumeNormalizedPath(url.standardizedFileURL.path)
-        let currentHomePath = dataVolumeNormalizedPath(
-            realHomeDirectory().standardizedFileURL.path
-        )
-        return selectedPath == currentHomePath
+        let selectedURL = url.standardizedFileURL
+        let selectedPath = Self.dataVolumeNormalizedPath(selectedURL.path)
+        let currentHomePath = Self.dataVolumeNormalizedPath(accountHomeDirectory.path)
+        return selectedPath == currentHomePath || sameFileSystemLocation(selectedURL, accountHomeDirectory)
     }
 
-    private func realHomeDirectory() -> URL {
-        if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
-            return URL(fileURLWithPath: String(cString: dir))
+    private static func resolveAccountHomeDirectory() -> URL {
+        let fallback = URL(fileURLWithPath: "/Users/\(NSUserName())", isDirectory: true)
+        let paths = [
+            passwordDatabaseHomeDirectory(),
+            ProcessInfo.processInfo.environment["HOME"],
+            NSHomeDirectory(),
+            FileManager.default.homeDirectoryForCurrentUser.path,
+            fallback.path,
+        ]
+
+        for path in paths.compactMap({ $0 }) {
+            let normalized = dataVolumeNormalizedPath(
+                URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path
+            )
+            if isAccountHomePath(normalized) {
+                return URL(fileURLWithPath: normalized, isDirectory: true)
+            }
         }
-        return URL(fileURLWithPath: "/Users/\(NSUserName())")
+        return fallback
     }
 
-    private func dataVolumeNormalizedPath(_ path: String) -> String {
+    private static func passwordDatabaseHomeDirectory() -> String? {
+        if let pw = getpwuid(getuid()), let dir = pw.pointee.pw_dir {
+            return String(cString: dir)
+        }
+        return nil
+    }
+
+    private static func isAccountHomePath(_ path: String) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard parts.count == 2, parts[0] == "Users" else { return false }
+        let reservedNames = ["", "shared", "deleted users"]
+        return !reservedNames.contains(parts[1].lowercased())
+    }
+
+    private static func dataVolumeNormalizedPath(_ path: String) -> String {
         let prefix = "/System/Volumes/Data"
         guard path.hasPrefix(prefix + "/") else { return path }
         return String(path.dropFirst(prefix.count))
+    }
+
+    private func sameFileSystemLocation(_ lhs: URL, _ rhs: URL) -> Bool {
+        var lhsInfo = stat()
+        var rhsInfo = stat()
+        guard Darwin.stat(lhs.path, &lhsInfo) == 0,
+              Darwin.stat(rhs.path, &rhsInfo) == 0 else {
+            return false
+        }
+        return lhsInfo.st_dev == rhsInfo.st_dev && lhsInfo.st_ino == rhsInfo.st_ino
     }
 
     private func saveBookmark(for url: URL) throws {
