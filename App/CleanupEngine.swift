@@ -4,16 +4,6 @@ import Foundation
 actor CleanupEngine {
     private let fileManager = FileManager.default
     private let currentUserID = getuid()
-    private let minimumInstallerBytes: Int64
-    private let minimumPartialDownloadBytes: Int64
-
-    init(
-        minimumInstallerBytes: Int64 = 50_000_000,
-        minimumPartialDownloadBytes: Int64 = 10_000_000
-    ) {
-        self.minimumInstallerBytes = minimumInstallerBytes
-        self.minimumPartialDownloadBytes = minimumPartialDownloadBytes
-    }
 
     func analyze(
         mode: CleanupMode,
@@ -99,7 +89,6 @@ actor CleanupEngine {
             candidates += appCacheReport.candidates
             warnings += appCacheReport.warnings
 
-            candidates += analyzeDownloads(home: home)
             candidates += manualRecommendations(home: home)
             let midCandidateIDs = Set(CleanupPolicy.targets(for: .mid).map(\.id))
             let additionalBytes = candidates
@@ -364,39 +353,6 @@ actor CleanupEngine {
             )),
             currentFootprint: directorySize(root)
         )]
-    }
-
-    private func analyzeDownloads(home: URL) -> [CleanupCandidate] {
-        let root = home.appendingPathComponent("Downloads", isDirectory: true)
-        guard revalidate(root, inside: home), let urls = try? fileManager.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey, .totalFileAllocatedSizeKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        let installers: Set<String> = ["dmg", "pkg", "mpkg", "xip"]
-        let partials: Set<String> = ["download", "crdownload", "part"]
-        let now = Date()
-        return urls.compactMap { url in
-            guard !isDirectory(url), !isSymbolicLink(url), isOwnedByCurrentUser(url) else { return nil }
-            let ext = url.pathExtension.lowercased()
-            let age = ageDays(of: url, now: now)
-            let size = allocatedSize(of: url)
-            let isInstaller = installers.contains(ext) && age >= 30 && size >= minimumInstallerBytes
-            let isPartial = partials.contains(ext) && age >= 7 && size >= minimumPartialDownloadBytes
-            guard isInstaller || isPartial else { return nil }
-            return CleanupCandidate(
-                id: "download-\(stableID(url.path))",
-                label: url.lastPathComponent,
-                detail: isPartial ? "Incomplete download • \(age) days old • moves to Trash" : "Old installer • \(age) days old • moves to Trash",
-                size: size,
-                itemCount: 1,
-                risk: .review,
-                defaultSelected: false,
-                operation: .recycle([url]),
-                currentFootprint: size
-            )
-        }
     }
 
     private func analyzeLeftovers(home: URL) -> AnalysisReport {

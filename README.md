@@ -15,10 +15,10 @@ The App Store target is a Swift 6 SwiftUI app. It is sandboxed, uses only Apple 
 
 - `LOW`: old user caches, logs, and crash reports with a 30-day rule.
 - `MID`: LOW plus known re-downloadable app caches with a 14-day rule, including closed-app Chrome and Spotify disk caches while preserving profiles and persistent storage.
-- `HIGH`: MID plus developer/package caches, closed-app render caches, and reviewed installers. HIGH-only findings start unchecked, and the app recommends MID when the additional immediate cleanup is under 1 GB. Applying HIGH requires typing `DELETE HIGH`.
+- `HIGH`: MID plus developer/package caches and closed-app render caches. HIGH-only findings start unchecked, and the app recommends MID when the additional immediate cleanup is under 1 GB. Applying HIGH requires typing `DELETE HIGH`.
 - `LEFTOVERS`: inactive bundle artifacts that do not match an installed app. Nothing is preselected and approved items move to Trash.
 
-HIGH is limited to documented cache locations inside the approved Home folder. Old installers and incomplete downloads are review-only and move to Trash. Project folders, device backups, Xcode archives/runtimes, AI models, Docker data, Trash, Time Machine snapshots, personal files, and protected system locations are never directly deleted.
+HIGH is limited to documented cache locations inside the approved Home folder. Personal folders such as Downloads, Desktop, Documents, Pictures, Movies, and Music are not scanned. Project folders, device backups, Xcode archives/runtimes, AI models, Docker data, Trash, Time Machine snapshots, personal files, and protected system locations are never directly deleted.
 
 The app keeps a local cleanup receipt per candidate and shows how much of a previous deletion remains reclaimed. Results distinguish permanent deletion from items moved to Trash and show the system-reported available-space change. Cleanup memory contains aggregate sizes and hashed candidate IDs, not file contents or file lists, and can be reset from the app menu.
 

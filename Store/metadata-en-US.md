@@ -32,12 +32,12 @@ FOUR CLEAR MODES
 
 • LOW finds old caches, logs, and crash reports using a conservative 30-day rule.
 • MID adds known re-downloadable app caches using a 14-day rule, including closed-app Chrome and Spotify disk caches while preserving profiles and persistent storage.
-• HIGH adds developer/package caches, closed-app render caches, and reviewed installers. Every HIGH-only action starts unchecked, and MID is recommended when the additional immediate cleanup is under 1 GB.
+• HIGH adds developer/package caches and closed-app render caches. Every HIGH-only action starts unchecked, and MID is recommended when the additional immediate cleanup is under 1 GB.
 • LEFTOVERS finds old app data that no longer matches an installed app. Nothing is preselected, and approved items move to Trash.
 
 REVIEW BEFORE REMOVE
 
-Analysis never deletes files. Every result shows its category, risk level, item count, estimated size, and available local cleanup history. HIGH-only caches, installers, and incomplete downloads start unchecked.
+Analysis never deletes files. Every result shows its category, risk level, item count, estimated size, and available local cleanup history. HIGH-only caches start unchecked.
 
 PROVEN CLEAN MEMORY
 
@@ -50,8 +50,9 @@ BUILT FOR SAFETY
 • Rejects symlinked paths and anything outside the approved folder.
 • Skips known app caches while the owning app is open.
 • Never scans or deletes project folders.
-• Moves approved old installers, partial downloads, and leftovers to Trash.
+• Moves approved leftovers to Trash.
 • Keeps personal documents and protected system files out of cleanup plans.
+• Does not scan Downloads, Desktop, Documents, Pictures, Movies, or Music.
 • Leaves device backups, Xcode archives/runtimes, AI models, Docker data, Trash, and Time Machine snapshots as manual recommendations.
 
 PRIVATE BY DESIGN

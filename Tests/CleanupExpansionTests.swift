@@ -90,7 +90,7 @@ final class CleanupExpansionTests: XCTestCase {
         XCTAssertTrue(report.warnings.contains { $0.contains("Slack render caches") })
     }
 
-    func testOldInstallerIsUncheckedReviewCandidateForTrash() async throws {
+    func testHighDoesNotScanProtectedDownloadsFolder() async throws {
         let home = try temporaryHome()
         defer { try? FileManager.default.removeItem(at: home) }
         let downloads = home.appendingPathComponent("Downloads", isDirectory: true)
@@ -99,16 +99,9 @@ final class CleanupExpansionTests: XCTestCase {
         try Data(repeating: 6, count: 4_096).write(to: installer)
         try setAge(days: 40, for: installer)
 
-        let engine = CleanupEngine(minimumInstallerBytes: 1)
-        let report = await engine.analyze(mode: .high, home: home, runningBundleIDs: [])
-        let candidate = try XCTUnwrap(report.candidates.first { $0.label == "OldTool.dmg" })
-        XCTAssertEqual(candidate.risk, .review)
-        XCTAssertFalse(candidate.defaultSelected)
-        if case .recycle = candidate.operation {
-            // Expected: reviewed user files are recoverable.
-        } else {
-            XCTFail("Old installers must move to Trash")
-        }
+        let report = await CleanupEngine().analyze(mode: .high, home: home, runningBundleIDs: [])
+        XCTAssertFalse(report.candidates.contains { $0.label == "OldTool.dmg" })
+        XCTAssertTrue(FileManager.default.fileExists(atPath: installer.path))
     }
 
     func testMavenCleanupPreservesLocallyInstalledArtifact() async throws {
