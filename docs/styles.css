@@ -35,6 +35,14 @@ p, li { color: var(--muted); }
 strong, a { color: var(--ink); }
 a { text-underline-offset: 4px; }
 
+.button-link {
+  display: inline-block;
+  border: 1px solid var(--ink);
+  padding: 10px 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .modes {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -55,4 +63,3 @@ nav { display: flex; flex-wrap: wrap; gap: 18px; }
   .modes { grid-template-columns: repeat(2, 1fr); }
   main { margin-top: 16px; }
 }
-
