@@ -16,8 +16,8 @@
     <section>
       <h2>Local file access</h2>
       <p>The app uses the standard macOS folder picker to request access to a folder you select. It reads local file names, sizes, types, and modification dates only to build the cleanup plan you requested. This information remains on your Mac.</p>
-      <p>A security-scoped bookmark is stored in the app's sandbox container so macOS can remember your folder choice. You can remove that bookmark at any time with <strong>Reset Folder Access</strong> in the app menu.</p>
-      <p>The app does not scan project folders. It stores optional cleanup-memory receipts containing aggregate byte counts, dates, cleanup mode, and hashed candidate identifiers. It does not store file contents or complete cleanup file lists. Use <strong>Reset Cleanup Memory</strong> to remove this local information.</p>
+      <p>A security-scoped bookmark is stored in the app's sandbox container so macOS can remember your folder choice. Removing the app's local container data removes this bookmark.</p>
+      <p>The app does not scan project folders. It stores optional cleanup-history receipts containing aggregate byte counts, dates, cleanup mode, and hashed candidate identifiers. It does not store file contents or complete cleanup file lists.</p>
     </section>
     <section>
       <h2>Changes to files</h2>
