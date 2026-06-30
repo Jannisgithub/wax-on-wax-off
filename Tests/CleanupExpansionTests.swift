@@ -15,6 +15,7 @@ final class CleanupExpansionTests: XCTestCase {
         private let savedHome: URL?
         private let selectedHome: URL?
         private(set) var requestHomeFolderCallCount = 0
+        private(set) var resetAuthorizationCallCount = 0
 
         init(savedHome: URL? = nil, selectedHome: URL? = nil) {
             self.savedHome = savedHome
@@ -30,7 +31,9 @@ final class CleanupExpansionTests: XCTestCase {
             return selectedHome
         }
 
-        func resetAuthorization() {}
+        func resetAuthorization() {
+            resetAuthorizationCallCount += 1
+        }
     }
 
 
@@ -271,6 +274,11 @@ final class CleanupExpansionTests: XCTestCase {
         XCTAssertEqual(enriched.reclaimEvidence?.retainedPercent, 80)
         let serialized = try String(contentsOf: historyURL, encoding: .utf8)
         XCTAssertFalse(serialized.contains("/Users/"))
+
+        store.reset()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: historyURL.path))
+        XCTAssertNil(store.enrich(candidate).reclaimEvidence)
     }
 
     @MainActor
@@ -417,6 +425,32 @@ final class CleanupExpansionTests: XCTestCase {
 
         XCTAssertEqual(accessManager.requestHomeFolderCallCount, 0)
         XCTAssertNotEqual(model.phase, .selectingFolder)
+    }
+
+    @MainActor
+    func testStartOverResetsFirstRunAndFolderApproval() {
+        let defaults = isolatedDefaults()
+        let accessManager = RecordingFolderAccessManager()
+        let model = AppModel(
+            demoActivityDelay: 0,
+            userDefaults: defaults,
+            accessManager: accessManager
+        )
+
+        model.openDemoMode()
+        model.selectDemoMode(.low)
+        XCTAssertNotEqual(model.phase, .launchChoice)
+        XCTAssertTrue(defaults.bool(forKey: "has-seen-launch-choice-v1"))
+
+        model.startOverAsFreshInstall()
+
+        XCTAssertEqual(model.phase, .launchChoice)
+        XCTAssertFalse(model.isDemoMode)
+        XCTAssertEqual(model.demoStep, .intro)
+        XCTAssertEqual(model.selectedMode, .mid)
+        XCTAssertTrue(model.candidates.isEmpty)
+        XCTAssertFalse(defaults.bool(forKey: "has-seen-launch-choice-v1"))
+        XCTAssertEqual(accessManager.resetAuthorizationCallCount, 1)
     }
 
     func testCopyUsesDeleteConfirmationAndNeutralScanText() throws {

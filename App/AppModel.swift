@@ -94,6 +94,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var canStartOver: Bool {
+        switch phase {
+        case .selectingFolder, .analyzing, .cleaning:
+            false
+        default:
+            true
+        }
+    }
+
     func runPrimaryAction() {
         switch phase {
         case .launchChoice:
@@ -115,6 +124,33 @@ final class AppModel: ObservableObject {
         default:
             break
         }
+    }
+
+    func confirmStartOver() {
+        guard canStartOver else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Start over?"
+        alert.informativeText = "This clears WaxOnWaxOff's saved folder approval, demo choice, and local cleanup history. Nothing outside the app is changed."
+        alert.addButton(withTitle: "Start Over")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        startOverAsFreshInstall()
+    }
+
+    func startOverAsFreshInstall() {
+        guard canStartOver else { return }
+        analysisGeneration += 1
+        accessManager.resetAuthorization()
+        historyStore.reset()
+        userDefaults.removeObject(forKey: Self.launchChoiceSeenKey)
+        authorizedHome = nil
+        selectedMode = .mid
+        isDemoMode = false
+        demoStep = .intro
+        clearScanState()
+        phase = .launchChoice
+        guidanceMessage = "Choose the path: true focus (Full Version) or practice first (Demo)."
     }
 
     func selectMode(_ mode: CleanupMode) {
