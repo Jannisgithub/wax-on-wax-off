@@ -82,7 +82,7 @@ struct MainView: View {
                 Text("Demo uses sample data only. No real files are scanned, moved, or deleted.")
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text("Use the macOS folder picker only. Do not enable Full Disk Access. Documents, Desktop, Downloads, Pictures, Movies, and Music are not scanned.")
+                Text("Choose your Home folder once. WaxOnWaxOff checks cleanup areas only.")
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -166,7 +166,7 @@ struct MainView: View {
         case .idle:
             idleContent
         case .selectingFolder:
-            messageContent(title: "SELECT HOME FOLDER", detail: "The macOS folder picker is open. Choose the signed-in user's Home folder to continue.")
+            messageContent(title: "SELECT HOME FOLDER", detail: "Choose your Home folder to continue.")
         case .readyToAnalyze:
             readyContent
         case .analyzing:
@@ -277,7 +277,7 @@ struct MainView: View {
             Text("03  REVIEW THE EXACT PLAN")
             Text("04  CONFIRM SELECTED PLAN")
             Divider().overlay(muted)
-            Text("The first run asks you to choose your Home folder through the macOS folder picker. Do not enable Full Disk Access; personal folders such as Documents, Desktop, and Downloads are not scanned.")
+            Text("Choose your Home folder to start. WaxOnWaxOff checks cleanup areas inside it and asks before removing anything.")
                 .foregroundStyle(muted)
             Button("Select Home Folder") {
                 model.runRealAnalysis()
@@ -295,11 +295,11 @@ struct MainView: View {
     private var readyContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("READY / \(model.selectedMode.title)").font(.title2).fontWeight(.black)
-            Text("Home folder selected. Choose a cleanup mode and run analysis.")
+            Text("Ready. Choose a cleanup mode and run analysis.")
                 .foregroundStyle(muted)
-            Text("Access stays local in the app sandbox. Full Disk Access is not needed, and personal folders are excluded.")
+            Text("Only cleanup areas are checked.")
                 .foregroundStyle(muted)
-            Text("No files are removed until you approve the selected plan.")
+            Text("Nothing is removed until you approve it.")
                 .foregroundStyle(muted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

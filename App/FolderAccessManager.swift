@@ -34,7 +34,7 @@ final class FolderAccessManager {
         let home = accountHomeDirectory
         let panel = NSOpenPanel()
         panel.title = "Choose Your Home Folder"
-        panel.message = "Choose your Home folder named \(home.lastPathComponent). WaxOnWaxOff uses this macOS picker only; do not enable Full Disk Access. The app accepts only this folder and does not scan Documents, Desktop, or Downloads."
+        panel.message = "Choose your Home folder named \(home.lastPathComponent). WaxOnWaxOff will check cleanup areas inside this folder and ask before removing anything."
         panel.prompt = "Use Home Folder"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true

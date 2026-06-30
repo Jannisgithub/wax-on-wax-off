@@ -116,7 +116,7 @@ final class AppModel: ObservableObject {
         result = nil
         if authorizedHome != nil || accessManager.authorizedHome() != nil {
             phase = .readyToAnalyze
-            guidanceMessage = "Home folder selected. Choose a cleanup mode and run analysis."
+            guidanceMessage = "Ready. Choose a cleanup mode and run analysis."
         } else {
             phase = .idle
             guidanceMessage = "Wax On, Wax Off. We review what is cluttered before we remove. The mind decides."
@@ -228,11 +228,11 @@ final class AppModel: ObservableObject {
         }
 
         phase = .selectingFolder
-        guidanceMessage = "The macOS folder picker is open. Choose your Home folder to continue."
+        guidanceMessage = "Choose your Home folder to continue."
         logger.info("Home folder selection started")
         guard let home = accessManager.requestHomeFolder() else {
             phase = .permissionError("Home folder selection did not complete. Select the signed-in user's Home folder to run real cleanup.")
-            guidanceMessage = "Select your Home folder to continue real analysis, or restart the app and choose Demo for sample data."
+            guidanceMessage = "Choose your Home folder to continue real analysis, or restart the app and choose Demo for sample data."
             logger.error("Home folder selection cancelled or rejected")
             return
         }
@@ -242,7 +242,7 @@ final class AppModel: ObservableObject {
     private func startAnalysis(with home: URL, source: String) {
         authorizedHome = home
         phase = .readyToAnalyze
-        guidanceMessage = "Home folder selected. Choose a cleanup mode and run analysis."
+        guidanceMessage = "Ready. Choose a cleanup mode and run analysis."
         logger.info("Folder selected from \(source, privacy: .public): \(home.path, privacy: .private)")
         startAnalysis()
     }
