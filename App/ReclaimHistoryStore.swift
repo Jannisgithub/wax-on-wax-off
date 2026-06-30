@@ -53,11 +53,6 @@ final class ReclaimHistoryStore {
         save()
     }
 
-    func reset() {
-        records = [:]
-        try? FileManager.default.removeItem(at: fileURL)
-    }
-
     private func load() {
         guard let data = try? Data(contentsOf: fileURL) else { return }
         let decoder = JSONDecoder()

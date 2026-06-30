@@ -3,39 +3,56 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Support — Wax on/Wax off</title>
+  <title>Support — Wax On/Wax Off</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <main>
     <header><h1>SUPPORT</h1><p>WAX ON/WAX OFF FOR MACOS</p></header>
     <section>
-      <h2>Ask a question or request support</h2>
-      <p>Email support directly at <strong>jannisaivatzidis@gmail.com</strong>.</p>
-      <p><a class="button-link" href="mailto:jannisaivatzidis@gmail.com?subject=Wax%20on%2FWax%20off%20Support">Email support</a></p>
+      <h2>Contact support</h2>
+      <p><strong>Wax On/Wax Off</strong> support email: <a href="mailto:jannisaivatzidis@gmail.com?subject=Wax%20On%2FWax%20Off%20Support">jannisaivatzidis@gmail.com</a>.</p>
+      <p>For questions, bug reports, refund-related App Store questions, or help using the app, contact us at <a href="mailto:jannisaivatzidis@gmail.com?subject=Wax%20On%2FWax%20Off%20Support">jannisaivatzidis@gmail.com</a>.</p>
+      <p><a class="button-link" href="mailto:jannisaivatzidis@gmail.com?subject=Wax%20On%2FWax%20Off%20Support">Email support</a></p>
       <p>Include the app version, macOS version, cleanup mode, and what happened. Do not include private file names, screenshots, or personal paths unless support asks for them.</p>
       <p>You can also use the <a href="https://github.com/Jannisgithub/wax-on-wax-off/issues">public support tracker</a> for non-private reports.</p>
     </section>
     <section>
-      <h2>Before cleanup</h2>
-      <p>Close applications whose caches you want to review. Select a mode, choose RUN, and approve your Home folder in the macOS folder picker. Analysis is read-only.</p>
-      <p>HIGH remains limited to documented cache locations. It never scans project folders or protected personal folders such as Downloads, Desktop, Documents, Pictures, Movies, or Music. Every HIGH-only action starts unchecked, and the app recommends MID when HIGH would add less than 1 GB of immediate cleanup.</p>
+      <h2>FAQ</h2>
+      <h3>What does the app do?</h3>
+      <p>Wax On/Wax Off reviews local cleanup items on your Mac, such as old caches, logs, crash reports, package caches, and Application Leftovers. You choose a mode, run analysis, review the plan, and confirm before anything changes.</p>
+      <h3>Does the app delete files automatically?</h3>
+      <p>No. Analysis is read-only. No files are removed without confirmation.</p>
+      <h3>Why do I see a file name during analysis or cleanup?</h3>
+      <p>Real cleanup shows one discreet current-processing row while it works. Paths are shortened to Home-relative form, such as <code>~/Library/Caches/...</code>, and are not saved as a file log.</p>
+      <h3>What is Demo Mode?</h3>
+      <p>Demo Mode is a separate selectable sample workflow. It uses built-in sample data so you can choose and preview LOW, MID, HIGH, and APPLICATION LEFTOVERS workflows. Demo Mode does not scan, move, or delete real files, and Skip demo is always available during the demo.</p>
+      <h3>What is LOW / MID / HIGH?</h3>
+      <p>LOW reviews old caches and logs using a 30-day rule. MID adds known app caches using a 14-day rule. HIGH adds reviewed developer, package, and closed-app render caches; HIGH-only items start unchecked.</p>
+      <h3>What are APPLICATION LEFTOVERS?</h3>
+      <p>APPLICATION LEFTOVERS are possible inactive app data items grouped by bundle identifier with Home-relative evidence paths. They are never selected automatically, and selected items are moved to Trash.</p>
+      <h3>How do I use real cleanup?</h3>
+      <p>Open Wax On/Wax Off, click <strong>Open Full Version</strong>, choose a cleanup mode, select your Home folder, then review and confirm selected items before anything changes.</p>
+      <h3>Why does the app ask for my Home folder?</h3>
+      <p>The Mac App Store build runs in the macOS App Sandbox. It can only inspect cleanup candidates after you choose your own Home folder in the standard macOS folder picker. Do not enable Full Disk Access; the app does not need it. The app rejects system folders, <code>/Users</code>, other user folders, and lookalike folders.</p>
+      <h3>Does the app scan Documents, Desktop, or Downloads?</h3>
+      <p>No. Protected personal folders such as Documents, Desktop, Downloads, Pictures, Movies, and Music are not scanned. Cleanup is limited to approved local cleanup locations such as old caches, logs, crash reports, and reviewed package or developer caches.</p>
+      <h3>How do I contact support?</h3>
+      <p>Email <a href="mailto:jannisaivatzidis@gmail.com?subject=Wax%20On%2FWax%20Off%20Support">jannisaivatzidis@gmail.com</a> with your app version, macOS version, cleanup mode, and a short description of the issue.</p>
     </section>
     <section>
-      <h2>If nothing appears</h2>
-      <p>The selected mode may have found no files old enough to qualify, or macOS may protect a location. Try another mode, verify the selected Home folder, and review any note shown by the app.</p>
+      <h2>Privacy and safety summary</h2>
+      <p>The app runs locally on your Mac.</p>
+      <p>The app does not require an account.</p>
+      <p>The app does not upload scanned files.</p>
+      <p>The app works only inside the Home folder you approve through macOS.</p>
+      <p>The app does not need Full Disk Access and does not scan protected personal folders.</p>
+      <p>No files are removed without confirmation.</p>
+      <p>Read the <a href="privacy.html">Privacy Policy</a>.</p>
     </section>
     <section>
-      <h2>Sample preview</h2>
-      <p>Choose <strong>PREVIEW SAMPLE PLAN</strong> to inspect populated review and result screens with generated data. Sample preview does not scan, delete, move, or change files.</p>
-    </section>
-    <section>
-      <h2>Understanding results</h2>
-      <p><strong>Deleted now</strong> is permanently removed cleanup data. <strong>Moved to Trash</strong> remains recoverable and does not free disk space until Trash is emptied. Available-space change is reported by macOS and can differ because apps and APFS snapshots change storage concurrently.</p>
-    </section>
-    <section>
-      <h2>Contact</h2>
-      <p>For support requests, email <a href="mailto:jannisaivatzidis@gmail.com?subject=Wax%20on%2FWax%20off%20Support">jannisaivatzidis@gmail.com</a> or use the <a href="https://github.com/Jannisgithub/wax-on-wax-off/issues">public support tracker</a>.</p>
+      <h2>Last updated</h2>
+      <p>June 30, 2026</p>
     </section>
     <section><nav><a href="index.html">Home</a><a href="privacy.html">Privacy Policy</a></nav></section>
   </main>

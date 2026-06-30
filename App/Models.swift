@@ -8,7 +8,23 @@ enum CleanupMode: String, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
-    var title: String { rawValue }
+    var title: String {
+        switch self {
+        case .low, .mid, .high:
+            rawValue
+        case .leftovers:
+            "APPLICATION LEFTOVERS"
+        }
+    }
+
+    var compactTitle: String {
+        switch self {
+        case .low, .mid, .high:
+            rawValue
+        case .leftovers:
+            "APP LEFTOVERS"
+        }
+    }
 
     var summary: String {
         switch self {
@@ -19,7 +35,7 @@ enum CleanupMode: String, CaseIterable, Identifiable, Sendable {
         case .high:
             "Adds reviewed developer, package, and closed-app render caches."
         case .leftovers:
-            "Inactive app data, reviewed individually and moved to Trash."
+            "Inactive application data, reviewed one item at a time and moved to Trash."
         }
     }
 
@@ -33,7 +49,7 @@ enum CleanupMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum CandidateRisk: String, Sendable {
+enum CandidateBadge: String, Sendable {
     case safe = "SAFE"
     case confirm = "CONFIRM"
     case review = "REVIEW"
@@ -80,7 +96,7 @@ struct CleanupCandidate: Identifiable, Sendable {
     let detail: String
     let size: Int64
     let itemCount: Int
-    let risk: CandidateRisk
+    let badge: CandidateBadge
     let defaultSelected: Bool
     let operation: CleanupOperation
     var currentFootprint: Int64 = 0
@@ -99,7 +115,7 @@ struct AnalysisReport: Sendable {
 
     var reclaimableBytes: Int64 {
         candidates
-            .filter { $0.defaultSelected && $0.risk != .review }
+            .filter { $0.defaultSelected && $0.badge != .review }
             .reduce(0) { $0 + $1.size }
     }
 }
@@ -152,13 +168,71 @@ struct CleanupResult: Sendable {
 }
 
 enum AppPhase: Equatable {
+    case launchChoice
     case idle
+    case selectingFolder
+    case readyToAnalyze
     case analyzing
-    case review
-    case confirming
+    case analysisComplete
+    case emptyResults
+    case permissionError(String)
+    case demoMode
+    case reviewReady
     case cleaning
-    case finished
+    case cleanupComplete
     case failed(String)
+}
+
+enum DemoStep: Int, CaseIterable, Sendable {
+    case intro
+    case low
+    case mid
+    case high
+    case leftovers
+    case complete
+
+    var title: String {
+        switch self {
+        case .intro: "Practice Start"
+        case .low: "LOW Practice"
+        case .mid: "MID Practice"
+        case .high: "HIGH Practice"
+        case .leftovers: "APPLICATION LEFTOVERS Practice"
+        case .complete: "Practice Complete"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .intro: "DEMO 0/5"
+        case .low: "DEMO 1/5"
+        case .mid: "DEMO 2/5"
+        case .high: "DEMO 3/5"
+        case .leftovers: "DEMO 4/5"
+        case .complete: "DEMO 5/5"
+        }
+    }
+
+    var mode: CleanupMode? {
+        switch self {
+        case .intro, .complete: nil
+        case .low: .low
+        case .mid: .mid
+        case .high: .high
+        case .leftovers: .leftovers
+        }
+    }
+
+    var next: DemoStep {
+        switch self {
+        case .intro: .low
+        case .low: .mid
+        case .mid: .high
+        case .high: .leftovers
+        case .leftovers: .complete
+        case .complete: .complete
+        }
+    }
 }
 
 extension Int64 {

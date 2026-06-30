@@ -1,36 +1,35 @@
 # App Review Notes
 
-Wax on/Wax off is a local, sandboxed macOS cleanup utility. It contains no login, network service, analytics, advertising, in-app purchases, or third-party SDKs.
+Thank you for the review. In this build we addressed all reported issues.
 
-## Guideline 2.4.5(v) response
+1. Support URL:
+   We updated the support page with contact information, support instructions, FAQ, safety information, privacy information, and a last-updated date.
 
-Build 18 removes any path that could cause administrator authentication. The first-run folder picker accepts only the signed-in user account Home folder and rejects /Users, system roots, lookalike folders, and other user folders. Cleanup analysis and apply also skip files or folders that are not owned by the signed-in user, including items moved through NSWorkspace.recycle, so the app never asks for administrator privileges.
+2. Home folder selection:
+   After selecting the Home folder, the app immediately starts analysis and shows live progress, then populated results, an empty-results message, or a permission message. If a saved folder permission fails, the app clears that saved access internally and asks the user to select the Home folder again.
 
-## Guideline 2.1(a) response
+3. Folder permission and sandboxing:
+   The app is sandboxed and uses only App Store-compatible user-selected file access. It asks the reviewer/user to choose the signed-in user's Home folder through the standard macOS folder picker, stores an app-scoped security bookmark, and rejects /Users, system folders, lookalike folders, and other user folders. The app does not request administrator privileges, Full Disk Access, temporary absolute-path exceptions, automation permissions, shell scripts, or unsandboxed system access. Protected personal folders such as Documents, Desktop, Downloads, Pictures, Movies, and Music are not scanned.
 
-Build 18 fixes the Home-folder recognition bug reported against build 5 and removes the protected Downloads-folder scan that could trigger an additional macOS privacy prompt. The first-run picker now resolves the real signed-in account Home folder from the macOS account record and explicitly avoids using the app sandbox container `Data` directory as the expected Home folder. The selected folder is accepted when it matches the normalized account Home path, including `/System/Volumes/Data/Users/...` aliases, or the same filesystem identity. `/Users`, system roots, other user folders, the app container, and protected personal folders remain rejected or unscanned.
+4. Privacy manifest:
+   The app privacy manifest declares the required-reason APIs used by the app: file timestamps for age-based cleanup checks inside the user-approved Home folder, disk-space information for the local before/after space readout, and app-owned UserDefaults access for local app state. The app collects no data, tracks no users, uses no third-party SDKs, and uploads no file metadata.
 
-## Review flow
+5. Demo Mode:
+   The app starts with Open Full Version for real cleanup or Open Demo for sample data. Demo Mode is a separate selectable sample workflow, not embedded inside real cleanup. It lets App Review choose LOW, MID, HIGH, or APPLICATION LEFTOVERS sample analysis directly so all app pages and features can be inspected. Demo Mode uses the same action wording as the full version while the surrounding demo notes state that no real files are scanned, moved, or deleted. Skip demo is available throughout the demo.
 
-1. Choose `LOW`, `MID`, `HIGH`, or `LEFTOVERS`.
-2. Select `RUN`.
-3. On the first run, the standard macOS folder picker asks for a Home folder. The app inspects only documented cleanup locations inside that folder; project folders are not scanned.
-4. Analysis is read-only. Reviewers can inspect and change the candidate selection before continuing.
-5. Select `CONFIRM & DELETE` and approve the native confirmation dialog.
-6. `HIGH` additionally requires the exact phrase `DELETE HIGH`. Every HIGH-only action is unselected by default. The app recommends MID when HIGH adds less than 1 GB of immediate cleanup.
-7. `LEFTOVERS` moves approved items through `NSWorkspace.recycle`; they do not count as immediately reclaimed storage.
-8. The result separates permanently deleted bytes from bytes moved to Trash and shows the system-reported available-capacity change.
+6. Safety and wording:
+   We revised app copy to avoid misleading or exaggerated claims. The app now uses neutral wording such as estimated reclaimable space, review before removing, and move to Trash. Files are never removed without user confirmation, HIGH cleanup requires typing DELETE, Application Leftovers are never selected automatically, and non-actionable areas such as backups, Trash, AI models, Docker data, and Time Machine snapshots are not shown as cleanup issues.
 
-## Sandbox and safety behavior
+7. Application Leftovers:
+   Application Leftovers uses documented macOS APIs and user-approved Home folder access. It groups possible leftovers by bundle identifier, verifies no matching installed app is found, shows Home-relative evidence paths, and moves only selected items to Trash through NSWorkspace.
 
-- Entitlements are limited to App Sandbox, user-selected read/write access, and app-scoped security bookmarks.
-- The bookmark is stored locally in the app container and can be removed with **Reset Folder Access** in the app menu.
-- The app rejects symlink components, paths outside the approved folder, paths not owned by the signed-in user, changed timestamps, and missing paths during apply.
-- Known app-specific cache targets are skipped while their owning application is running.
-- Project folders are not scanned or modified.
-- Downloads, Desktop, Documents, Pictures, Movies, and Music are not scanned.
-- Device backups, Xcode archives/runtimes, AI models, Docker data, Xcode.app, Trash, Time Machine snapshots, personal documents, and protected system paths are never modified.
-- The app uses only Apple frameworks and does not launch shell commands, request administrator privileges, or depend on optional runtimes.
-- Cleanup memory stores only aggregate sizes, timestamps, mode, and hashed candidate IDs in the app container. It can be removed with **Reset Cleanup Memory**.
+8. Live progress:
+   During real cleanup analysis and cleanup, the activity screen shows one discreet current-processing row using shortened Home-relative paths such as `~/Library/Caches/...`. It does not show the full `/Users/...` Home path and is not a persistent file log.
 
-If the review Mac has no eligible old cache data, analysis correctly returns an empty plan. No demo account is required.
+To test Demo Mode:
+Open the app -> click Open Demo -> choose LOW, MID, HIGH, or APPLICATION LEFTOVERS sample analysis -> inspect the populated sample results -> click Skip demo at any time.
+
+To test real analysis:
+Open the app -> click Open Full Version -> choose a cleanup mode -> select the Home folder -> analysis starts automatically -> review items before confirming.
+
+No demo account is required. The app contains no login, network service, analytics, advertising, in-app purchases, or third-party SDKs.

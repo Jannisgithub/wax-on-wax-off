@@ -28,6 +28,30 @@ final class CleanupPolicyTests: XCTestCase {
         XCTAssertEqual(CleanupMode.leftovers.ageDays, 45)
     }
 
+    func testApplicationLeftoversUsesClearUserFacingTitles() {
+        XCTAssertEqual(CleanupMode.leftovers.title, "APPLICATION LEFTOVERS")
+        XCTAssertEqual(CleanupMode.leftovers.compactTitle, "APP LEFTOVERS")
+        XCTAssertEqual(DemoStep.leftovers.title, "APPLICATION LEFTOVERS Practice")
+    }
+
+    func testPrivacyManifestDeclaresRequiredReasonAPIs() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let manifestURL = repoRoot
+            .appendingPathComponent("App/Resources/PrivacyInfo.xcprivacy")
+        let data = try Data(contentsOf: manifestURL)
+        let manifest = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+        let entries = try XCTUnwrap(manifest["NSPrivacyAccessedAPITypes"] as? [[String: Any]])
+        let categories = Set(entries.compactMap { $0["NSPrivacyAccessedAPIType"] as? String })
+
+        XCTAssertTrue(categories.contains("NSPrivacyAccessedAPICategoryFileTimestamp"))
+        XCTAssertTrue(categories.contains("NSPrivacyAccessedAPICategoryDiskSpace"))
+        XCTAssertTrue(categories.contains("NSPrivacyAccessedAPICategoryUserDefaults"))
+    }
+
     func testLowAnalysisFindsAndDeletesOnlyOldFiles() async throws {
         let home = try temporaryHome()
         defer { try? FileManager.default.removeItem(at: home) }
@@ -52,6 +76,40 @@ final class CleanupPolicyTests: XCTestCase {
         XCTAssertEqual(result.removedItems, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: oldFile.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: recentFile.path))
+    }
+
+    func testProgressUpdatesUseHomeRelativePaths() async throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let cache = home.appendingPathComponent("Library/Caches/com.example.progress", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let oldFile = cache.appendingPathComponent("old.cache")
+        try Data(repeating: 1, count: 4_096).write(to: oldFile)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: -40 * 86_400)],
+            ofItemAtPath: oldFile.path
+        )
+
+        let collector = ProgressCollector()
+        let engine = CleanupEngine()
+        let report = await engine.analyze(
+            mode: .low,
+            home: home,
+            runningBundleIDs: [],
+            progress: { await collector.append($0) }
+        )
+        _ = await engine.apply(
+            candidates: report.candidates,
+            home: home,
+            progress: { await collector.append($0) }
+        )
+
+        let updates = await collector.all()
+        XCTAssertTrue(updates.contains { $0.contains("~/Library/Caches") })
+        XCTAssertTrue(updates.contains { $0.contains("Removing ~/Library/Caches") })
+        XCTAssertFalse(updates.contains { $0.contains("NOW /") })
+        XCTAssertFalse(updates.contains { $0.contains(home.path) })
     }
 
     func testAnalysisRejectsSymlinkedCleanupRoot() async throws {
@@ -122,5 +180,17 @@ final class CleanupPolicyTests: XCTestCase {
             .appendingPathComponent("WaxOnWaxOffTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+}
+
+private actor ProgressCollector {
+    private var updates: [String] = []
+
+    func append(_ update: String) {
+        updates.append(update)
+    }
+
+    func all() -> [String] {
+        updates
     }
 }

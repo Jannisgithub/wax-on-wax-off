@@ -1,5 +1,30 @@
 import Darwin
+import AppKit
 import Foundation
+
+typealias CleanupProgressUpdate = @Sendable (String) async -> Void
+
+private enum LeftoverRootKind {
+    case bundleDirectory
+    case plistFile
+    case savedStateDirectory
+    case groupContainerDirectory
+}
+
+private struct LeftoverScanRoot {
+    let relativePath: String
+    let label: String
+    let kind: LeftoverRootKind
+}
+
+private struct LeftoverPathEvidence {
+    let bundleID: String
+    let url: URL
+    let relativePath: String
+    let rootLabel: String
+    let ageDays: Int
+    let size: Int64
+}
 
 actor CleanupEngine {
     private let fileManager = FileManager.default
@@ -8,10 +33,11 @@ actor CleanupEngine {
     func analyze(
         mode: CleanupMode,
         home: URL,
-        runningBundleIDs: Set<String>
-    ) -> AnalysisReport {
+        runningBundleIDs: Set<String>,
+        progress: CleanupProgressUpdate? = nil
+    ) async -> AnalysisReport {
         guard mode != .leftovers else {
-            return analyzeLeftovers(home: home)
+            return await analyzeLeftovers(home: home, runningBundleIDs: runningBundleIDs, progress: progress)
         }
 
         let cutoff = Calendar.current.date(byAdding: .day, value: -mode.ageDays, to: Date()) ?? .distantPast
@@ -19,6 +45,7 @@ actor CleanupEngine {
         var warnings: [String] = []
 
         for target in CleanupPolicy.targets(for: mode) {
+            await progress?("Checking \(target.label) · \(displayPath(target.relativePath))")
             if !ownersAreClosed(target.ownerBundleIDs, runningBundleIDs: runningBundleIDs) {
                 warnings.append("Skipped \(target.label): close the owning app first.")
                 continue
@@ -42,7 +69,7 @@ actor CleanupEngine {
                 } else {
                     excludedRoots = []
                 }
-                let files = oldFiles(in: url, cutoff: cutoff, excluding: excludedRoots)
+                let files = await oldFiles(in: url, cutoff: cutoff, excluding: excludedRoots, home: home, progress: progress)
                 let size = files.reduce(Int64(0)) { $0 + allocatedSize(of: $1) }
                 guard size > 0 else { continue }
                 candidates.append(CleanupCandidate(
@@ -51,7 +78,7 @@ actor CleanupEngine {
                     detail: "\(files.count) item(s) • \(target.detail)",
                     size: size,
                     itemCount: files.count,
-                    risk: target.risk,
+                    badge: target.badge,
                     defaultSelected: target.defaultSelected,
                     operation: .deleteFiles(DeleteFilesPlan(
                         urls: files,
@@ -63,6 +90,7 @@ actor CleanupEngine {
                     currentFootprint: directorySize(url)
                 ))
             case .entireTree:
+                await progress?("Measuring \(target.label) · \(displayPath(url, relativeTo: home))")
                 guard let size = measureTreeIfOwnedByCurrentUser(url), size > 0 else { continue }
                 candidates.append(CleanupCandidate(
                     id: target.id,
@@ -70,7 +98,7 @@ actor CleanupEngine {
                     detail: target.detail,
                     size: size,
                     itemCount: 1,
-                    risk: target.risk,
+                    badge: target.badge,
                     defaultSelected: target.defaultSelected,
                     operation: .deleteTree(treePlan(
                         url: url,
@@ -84,12 +112,11 @@ actor CleanupEngine {
         }
 
         if mode == .high {
-            candidates += analyzeMavenRemoteCache(home: home, cutoff: cutoff)
-            let appCacheReport = analyzeAppSupportCaches(home: home, runningBundleIDs: runningBundleIDs)
+            candidates += await analyzeMavenRemoteCache(home: home, cutoff: cutoff, progress: progress)
+            let appCacheReport = await analyzeAppSupportCaches(home: home, runningBundleIDs: runningBundleIDs, progress: progress)
             candidates += appCacheReport.candidates
             warnings += appCacheReport.warnings
 
-            candidates += manualRecommendations(home: home)
             let midCandidateIDs = Set(CleanupPolicy.targets(for: .mid).map(\.id))
             let additionalBytes = candidates
                 .filter { !midCandidateIDs.contains($0.id) && isImmediateCleanup($0.operation) }
@@ -111,8 +138,9 @@ actor CleanupEngine {
     func apply(
         candidates: [CleanupCandidate],
         home: URL,
-        runningBundleIDs: Set<String> = []
-    ) -> CleanupResult {
+        runningBundleIDs: Set<String> = [],
+        progress: CleanupProgressUpdate? = nil
+    ) async -> CleanupResult {
         var removedBytes: Int64 = 0
         var removedItems = 0
         var skippedItems = 0
@@ -127,12 +155,14 @@ actor CleanupEngine {
 
             switch candidate.operation {
             case let .deleteFiles(plan):
+                await progress?("Revalidating \(candidate.label)")
                 guard ownersAreClosed(plan.ownerBundleIDs, runningBundleIDs: runningBundleIDs) else {
                     candidateSkippedItems += plan.urls.count
                     warnings.append("Skipped \(candidate.label): its owning app started after analysis.")
                     break
                 }
                 for url in plan.urls {
+                    await progress?("Removing \(displayPath(url, relativeTo: home))")
                     guard revalidate(url, inside: plan.scopeRoot), modificationDate(of: url) <= plan.cutoff else {
                         candidateSkippedItems += 1
                         continue
@@ -154,6 +184,7 @@ actor CleanupEngine {
                 remainingFootprint = directorySize(plan.measurementRoot)
 
             case let .deleteTree(plan):
+                await progress?("Removing \(displayPath(plan.url, relativeTo: home))")
                 if validate(plan, runningBundleIDs: runningBundleIDs) {
                     do {
                         try fileManager.removeItem(at: plan.url)
@@ -171,6 +202,7 @@ actor CleanupEngine {
 
             case let .deleteTrees(plans, measurementRoot: _):
                 for plan in plans {
+                    await progress?("Removing \(displayPath(plan.url, relativeTo: home))")
                     guard validate(plan, runningBundleIDs: runningBundleIDs) else {
                         candidateSkippedItems += 1
                         continue
@@ -223,8 +255,9 @@ actor CleanupEngine {
 
     private func analyzeAppSupportCaches(
         home: URL,
-        runningBundleIDs: Set<String>
-    ) -> (candidates: [CleanupCandidate], warnings: [String]) {
+        runningBundleIDs: Set<String>,
+        progress: CleanupProgressUpdate?
+    ) async -> (candidates: [CleanupCandidate], warnings: [String]) {
         let cacheNames: Set<String> = [
             "Cache", "Code Cache", "GPUCache", "DawnCache", "GrShaderCache", "ShaderCache",
         ]
@@ -232,6 +265,7 @@ actor CleanupEngine {
         var warnings: [String] = []
 
         for rule in CleanupPolicy.appSupportCaches {
+            await progress?("Checking \(rule.label) · \(displayPath(rule.relativePath))")
             if !ownersAreClosed(rule.ownerBundleIDs, runningBundleIDs: runningBundleIDs) {
                 warnings.append("Skipped \(rule.label): close the owning app first.")
                 continue
@@ -253,6 +287,7 @@ actor CleanupEngine {
                     enumerator.skipDescendants()
                     continue
                 }
+                await progress?("Checking \(displayPath(url, relativeTo: home))")
                 guard isDirectory(url), !isSymbolicLink(url) else { continue }
                 guard cacheNames.contains(url.lastPathComponent) else { continue }
                 if fixedPaths.contains(url.standardizedFileURL) {
@@ -282,7 +317,7 @@ actor CleanupEngine {
                 detail: "\(plans.count) HTTP, code, or GPU cache folder(s) • site data is excluded",
                 size: size,
                 itemCount: plans.count,
-                risk: .confirm,
+                badge: .confirm,
                 defaultSelected: false,
                 operation: .deleteTrees(plans, measurementRoot: root),
                 currentFootprint: size
@@ -291,8 +326,13 @@ actor CleanupEngine {
         return (candidates, warnings)
     }
 
-    private func analyzeMavenRemoteCache(home: URL, cutoff: Date) -> [CleanupCandidate] {
+    private func analyzeMavenRemoteCache(
+        home: URL,
+        cutoff: Date,
+        progress: CleanupProgressUpdate?
+    ) async -> [CleanupCandidate] {
         let root = home.appendingPathComponent(".m2/repository", isDirectory: true)
+        await progress?("Checking Maven remote artifacts · \(displayPath(root, relativeTo: home))")
         guard revalidate(root, inside: home), isDirectory(root), isOwnedByCurrentUser(root) else { return [] }
         guard let enumerator = fileManager.enumerator(
             at: root,
@@ -301,7 +341,9 @@ actor CleanupEngine {
         ) else { return [] }
 
         var remoteFiles: Set<URL> = []
-        for case let marker as URL in enumerator where marker.lastPathComponent == "_remote.repositories" {
+        while let marker = enumerator.nextObject() as? URL {
+            guard marker.lastPathComponent == "_remote.repositories" else { continue }
+            await progress?("Checking \(displayPath(marker, relativeTo: home))")
             guard modificationDate(of: marker) <= cutoff,
                   let contents = try? String(contentsOf: marker, encoding: .utf8) else { continue }
             let parent = marker.deletingLastPathComponent()
@@ -342,7 +384,7 @@ actor CleanupEngine {
             detail: "\(urls.count) remotely sourced file(s) • local installs are preserved",
             size: size,
             itemCount: urls.count,
-            risk: .confirm,
+            badge: .confirm,
             defaultSelected: false,
             operation: .deleteFiles(DeleteFilesPlan(
                 urls: urls,
@@ -355,85 +397,178 @@ actor CleanupEngine {
         )]
     }
 
-    private func analyzeLeftovers(home: URL) -> AnalysisReport {
+    private func analyzeLeftovers(
+        home: URL,
+        runningBundleIDs: Set<String>,
+        progress: CleanupProgressUpdate?
+    ) async -> AnalysisReport {
         let installed = installedBundleIDs(home: home)
         let now = Date()
-        let roots: [(String, String, Int)] = [
-            ("Library/Caches", "", 30),
-            ("Library/Preferences", ".plist", 45),
-            ("Library/Saved Application State", ".savedState", 45),
-            ("Library/Containers", "", 45),
+        let minimumAge = CleanupMode.leftovers.ageDays
+        let primaryRoots = [
+            LeftoverScanRoot(relativePath: "Library/Caches", label: "Caches", kind: .bundleDirectory),
+            LeftoverScanRoot(relativePath: "Library/Preferences", label: "Preferences", kind: .plistFile),
+            LeftoverScanRoot(relativePath: "Library/Saved Application State", label: "Saved State", kind: .savedStateDirectory),
+            LeftoverScanRoot(relativePath: "Library/Containers", label: "Containers", kind: .bundleDirectory),
+            LeftoverScanRoot(relativePath: "Library/Application Support", label: "Application Support", kind: .bundleDirectory),
         ]
-        var candidates: [CleanupCandidate] = []
+        var evidenceByBundleID: [String: [LeftoverPathEvidence]] = [:]
 
-        for (relativeRoot, suffix, minimumAge) in roots {
-            let root = home.appendingPathComponent(relativeRoot)
-            guard let children = try? fileManager.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: [.contentModificationDateKey, .isSymbolicLinkKey],
-                options: [.skipsHiddenFiles]
-            ) else { continue }
-
-            for url in children {
-                let rawName = suffix.isEmpty ? url.lastPathComponent : String(url.lastPathComponent.dropLast(suffix.count))
-                let bundleID = rawName.lowercased()
-                guard isBundleIdentifier(bundleID),
-                      !bundleID.hasPrefix("com.apple."),
-                      !installed.contains(bundleID),
-                      ageDays(of: url, now: now) >= minimumAge,
-                      revalidate(url, inside: home) else { continue }
-
-                guard let size = measureTreeIfOwnedByCurrentUser(url), size >= 1_000_000 else { continue }
-                candidates.append(CleanupCandidate(
-                    id: "leftover-\(stableID(url.path))",
-                    label: rawName,
-                    detail: "No matching installed app • \(ageDays(of: url, now: now))+ days old",
-                    size: size,
-                    itemCount: 1,
-                    risk: .confirm,
-                    defaultSelected: false,
-                    operation: .recycle([url]),
-                    currentFootprint: size
-                ))
+        for root in primaryRoots {
+            let evidence = await leftoverEvidence(
+                in: root,
+                home: home,
+                now: now,
+                minimumAge: minimumAge,
+                allowedBundleIDs: nil,
+                progress: progress
+            )
+            for item in evidence {
+                evidenceByBundleID[item.bundleID, default: []].append(item)
             }
+        }
+
+        let groupEvidence = await leftoverEvidence(
+            in: LeftoverScanRoot(
+                relativePath: "Library/Group Containers",
+                label: "Group Containers",
+                kind: .groupContainerDirectory
+            ),
+            home: home,
+            now: now,
+            minimumAge: minimumAge,
+            allowedBundleIDs: Set(evidenceByBundleID.keys),
+            progress: progress
+        )
+        for item in groupEvidence {
+            evidenceByBundleID[item.bundleID, default: []].append(item)
+        }
+
+        var candidates: [CleanupCandidate] = []
+        for (bundleID, evidence) in evidenceByBundleID {
+            guard !bundleID.hasPrefix("com.apple."),
+                  !installed.contains(bundleID),
+                  ownersAreClosed([bundleID], runningBundleIDs: runningBundleIDs) else {
+                continue
+            }
+            let workspaceMatches = await installedApplicationURLs(for: bundleID)
+            guard workspaceMatches.isEmpty else {
+                continue
+            }
+            let orderedEvidence = evidence.sorted {
+                if $0.rootLabel != $1.rootLabel { return $0.rootLabel < $1.rootLabel }
+                return $0.relativePath < $1.relativePath
+            }
+            let size = orderedEvidence.reduce(Int64(0)) { $0 + $1.size }
+            guard size >= 1_000_000 else { continue }
+            let urls = orderedEvidence.map(\.url)
+            let oldestAge = orderedEvidence.map(\.ageDays).max() ?? minimumAge
+            candidates.append(CleanupCandidate(
+                id: "leftover-\(stableID(bundleID))",
+                label: bundleID,
+                detail: leftoverDetail(
+                    bundleID: bundleID,
+                    evidence: orderedEvidence,
+                    oldestAge: oldestAge
+                ),
+                size: size,
+                itemCount: orderedEvidence.count,
+                badge: .confirm,
+                defaultSelected: false,
+                operation: .recycle(urls),
+                currentFootprint: size
+            ))
         }
 
         return AnalysisReport(
             mode: .leftovers,
             candidates: candidates.sorted { $0.size > $1.size },
-            warnings: ["Leftovers are never selected automatically and are moved to Trash, not permanently deleted."]
+            warnings: ["Application Leftovers are never selected automatically and are moved to Trash, not permanently deleted."]
         )
     }
 
-    private func manualRecommendations(home: URL) -> [CleanupCandidate] {
-        let locations: [(String, String, String, URL)] = [
-            ("manual-xcode", "Xcode archives", "Retain archives needed for crash symbolication; manage in Xcode Organizer.", home.appendingPathComponent("Library/Developer/Xcode/Archives")),
-            ("manual-backups", "iPhone and iPad backups", "Personal recovery data; manage with Finder's Manage Backups.", home.appendingPathComponent("Library/Application Support/MobileSync/Backup")),
-            ("manual-models", "Downloaded AI models", "Models may be private or needed offline; manage with the owning tool.", home.appendingPathComponent(".cache/huggingface/hub")),
-            ("manual-docker", "Docker data", "Use Docker's prune tools so referenced images and volumes remain protected.", home.appendingPathComponent("Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw")),
-        ]
-        var result = locations.compactMap { id, label, detail, url -> CleanupCandidate? in
-            guard exists(url) else { return nil }
-            let size = directorySize(url)
-            guard size > 0 else { return nil }
-            return CleanupCandidate(
-                id: id,
-                label: label,
-                detail: detail,
-                size: size,
-                itemCount: 0,
-                risk: .review,
-                defaultSelected: false,
-                operation: .recommendation,
-                currentFootprint: size
-            )
+    private func leftoverEvidence(
+        in root: LeftoverScanRoot,
+        home: URL,
+        now: Date,
+        minimumAge: Int,
+        allowedBundleIDs: Set<String>?,
+        progress: CleanupProgressUpdate?
+    ) async -> [LeftoverPathEvidence] {
+        await progress?("Checking Application Leftovers · \(displayPath(root.relativePath))")
+        let rootURL = home.appendingPathComponent(root.relativePath, isDirectory: true)
+        guard revalidate(rootURL, inside: home) else { return [] }
+        guard let children = try? fileManager.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var evidence: [LeftoverPathEvidence] = []
+        for url in children {
+            await progress?("Checking \(displayPath(url, relativeTo: home))")
+            guard revalidate(url, inside: home),
+                  let bundleID = leftoverBundleID(for: url, kind: root.kind),
+                  isBundleIdentifier(bundleID),
+                  allowedBundleIDs?.contains(bundleID) ?? true,
+                  !bundleID.hasPrefix("com.apple.") else {
+                continue
+            }
+            let age = ageDays(of: url, now: now)
+            guard age >= minimumAge,
+                  let size = measureTreeIfOwnedByCurrentUser(url),
+                  size > 0 else {
+                continue
+            }
+            evidence.append(LeftoverPathEvidence(
+                bundleID: bundleID,
+                url: url,
+                relativePath: displayPath(url, relativeTo: home),
+                rootLabel: root.label,
+                ageDays: age,
+                size: size
+            ))
         }
-        result += [
-            CleanupCandidate(id: "manual-components", label: "Xcode platforms and runtimes", detail: "Remove unused components in Xcode Settings, where compatibility is known.", size: 0, itemCount: 0, risk: .review, defaultSelected: false, operation: .recommendation),
-            CleanupCandidate(id: "manual-trash", label: "Trash", detail: "Review and empty with Finder when you are ready.", size: 0, itemCount: 0, risk: .review, defaultSelected: false, operation: .recommendation),
-            CleanupCandidate(id: "manual-snapshots", label: "Time Machine local snapshots", detail: "Manage with macOS and Time Machine settings.", size: 0, itemCount: 0, risk: .review, defaultSelected: false, operation: .recommendation),
-        ]
-        return result
+        return evidence
+    }
+
+    private func leftoverBundleID(for url: URL, kind: LeftoverRootKind) -> String? {
+        let rawName = url.lastPathComponent
+        switch kind {
+        case .bundleDirectory:
+            return rawName.lowercased()
+        case .plistFile:
+            let suffix = ".plist"
+            guard rawName.lowercased().hasSuffix(suffix) else { return nil }
+            return String(rawName.dropLast(suffix.count)).lowercased()
+        case .savedStateDirectory:
+            let suffix = ".savedState"
+            guard rawName.hasSuffix(suffix) else { return nil }
+            return String(rawName.dropLast(suffix.count)).lowercased()
+        case .groupContainerDirectory:
+            let prefix = "group."
+            let lowercased = rawName.lowercased()
+            guard lowercased.hasPrefix(prefix) else { return nil }
+            return String(lowercased.dropFirst(prefix.count))
+        }
+    }
+
+    private func leftoverDetail(
+        bundleID: String,
+        evidence: [LeftoverPathEvidence],
+        oldestAge: Int
+    ) -> String {
+        let pathLimit = 3
+        let visiblePaths = evidence.prefix(pathLimit).map(\.relativePath).joined(separator: ", ")
+        let hiddenCount = max(0, evidence.count - pathLimit)
+        let pathSummary = hiddenCount > 0 ? "\(visiblePaths), +\(hiddenCount) more" : visiblePaths
+        return "Missing installed app for \(bundleID) • \(evidence.count) item(s) • oldest \(oldestAge)d • \(pathSummary) • moves to Trash if selected"
+    }
+
+    private func installedApplicationURLs(for bundleID: String) async -> [URL] {
+        await MainActor.run {
+            NSWorkspace.shared.urlsForApplications(withBundleIdentifier: bundleID)
+        }
     }
 
     private func treePlan(
@@ -472,7 +607,13 @@ actor CleanupEngine {
         }
     }
 
-    private func oldFiles(in root: URL, cutoff: Date, excluding excludedRoots: [URL] = []) -> [URL] {
+    private func oldFiles(
+        in root: URL,
+        cutoff: Date,
+        excluding excludedRoots: [URL] = [],
+        home: URL,
+        progress: CleanupProgressUpdate?
+    ) async -> [URL] {
         let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey]
         guard let enumerator = fileManager.enumerator(
             at: root,
@@ -481,7 +622,8 @@ actor CleanupEngine {
         ) else { return [] }
 
         var result: [URL] = []
-        for case let url as URL in enumerator {
+        while let url = enumerator.nextObject() as? URL {
+            await progress?("Checking \(displayPath(url, relativeTo: home))")
             if excludedRoots.contains(where: { excluded in
                 url.standardizedFileURL == excluded || url.standardizedFileURL.path.hasPrefix(excluded.path + "/")
             }) {
@@ -496,6 +638,27 @@ actor CleanupEngine {
             result.append(url)
         }
         return result
+    }
+
+    private func displayPath(_ relativePath: String) -> String {
+        let cleaned = relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return shortenDisplayPath(cleaned.isEmpty ? "~" : "~/" + cleaned)
+    }
+
+    private func displayPath(_ url: URL, relativeTo home: URL) -> String {
+        let homePath = home.standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        guard path == homePath || path.hasPrefix(homePath + "/") else {
+            return shortenDisplayPath(url.lastPathComponent)
+        }
+        let relative = String(path.dropFirst(homePath.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return displayPath(relative)
+    }
+
+    private func shortenDisplayPath(_ path: String) -> String {
+        guard path.count > 92 else { return path }
+        let suffix = path.suffix(76)
+        return "…/" + suffix.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
     private func directorySize(_ url: URL) -> Int64 {

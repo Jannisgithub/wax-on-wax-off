@@ -33,8 +33,8 @@ final class FolderAccessManager {
     func requestHomeFolder() -> URL? {
         let home = accountHomeDirectory
         let panel = NSOpenPanel()
-        panel.title = "Allow cleanup access"
-        panel.message = "Choose the signed-in user's Home folder named \(home.lastPathComponent). The app rejects /Users, system folders, and other user folders, and never asks for administrator privileges."
+        panel.title = "Choose Your Home Folder"
+        panel.message = "Choose your Home folder named \(home.lastPathComponent). WaxOnWaxOff uses this macOS picker only; do not enable Full Disk Access. The app accepts only this folder and does not scan Documents, Desktop, or Downloads."
         panel.prompt = "Use Home Folder"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true

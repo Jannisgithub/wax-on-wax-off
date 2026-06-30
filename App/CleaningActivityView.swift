@@ -1,30 +1,27 @@
 import SwiftUI
 
-enum CleaningActivityMode {
+enum CleaningActivityMode: Equatable {
     case analyzing
     case cleaning
 
-    var framesPerSecond: Double {
-        switch self {
-        case .analyzing: 0.8
-        case .cleaning: 0.95
-        }
-    }
+    static let framesPerSecond: Double = 1.05
 }
 
 struct CleaningActivityView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var animationStartDate = Date()
 
     let mode: CleaningActivityMode
     let title: String
     let detail: String
+    let currentItem: String
     let ink: Color
     let muted: Color
 
     var body: some View {
         VStack(spacing: 8) {
             activityScene
-                .frame(width: 360, height: 220)
+                .frame(width: 340, height: 220)
                 .accessibilityHidden(true)
 
             BreathingLoadingBar(ink: ink, muted: muted)
@@ -35,23 +32,38 @@ struct CleaningActivityView: View {
 
             Text(detail)
                 .foregroundStyle(muted)
+
+            if !currentItem.isEmpty {
+                Text(currentItem)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 560)
+                    .padding(.top, 4)
+                    .accessibilityLabel("Currently processing \(currentItem)")
+            }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title). \(detail)")
+        .accessibilityLabel(currentItem.isEmpty ? "\(title). \(detail)" : "\(title). \(detail). Currently processing \(currentItem)")
+        .onAppear {
+            animationStartDate = Date()
+        }
+        .onChange(of: mode) { _, _ in
+            animationStartDate = Date()
+        }
     }
 
     @ViewBuilder
     private var activityScene: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
-            let elapsed = timeline.date.timeIntervalSinceReferenceDate
-            let speed = reduceMotion ? mode.framesPerSecond * 0.5 : mode.framesPerSecond
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            let elapsed = max(0, timeline.date.timeIntervalSince(animationStartDate))
+            let speed = reduceMotion ? CleaningActivityMode.framesPerSecond * 0.5 : CleaningActivityMode.framesPerSecond
             let framePosition = elapsed * speed
             let frameFloor = floor(framePosition)
             let frame = Int(frameFloor) % 4
             let phase = framePosition - frameFloor
-            let blendStart = 0.4
-            let blend = min(max((phase - blendStart) / (1 - blendStart), 0), 1)
-            let smoothBlend = blend * blend * (3 - 2 * blend)
+            let smoothBlend = phase
 
             AnimatedCleaningScene(
                 frame: frame,
@@ -66,14 +78,15 @@ struct CleaningActivityView: View {
 
 private struct BreathingLoadingBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var animationStartDate = Date()
 
     let ink: Color
     let muted: Color
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-            let elapsed = timeline.date.timeIntervalSinceReferenceDate
-            let duration = reduceMotion ? 9.6 : 6.4
+            let elapsed = max(0, timeline.date.timeIntervalSince(animationStartDate))
+            let duration = reduceMotion ? 8.0 : 4.8
             let cycle = elapsed.truncatingRemainder(dividingBy: duration) / duration
             let isInhaling = cycle < 0.45
             let phase = isInhaling ? cycle / 0.45 : (cycle - 0.45) / 0.55
@@ -81,6 +94,9 @@ private struct BreathingLoadingBar: View {
             let amount = isInhaling ? eased : 1 - eased
 
             breathingBar(amount: amount, isInhaling: isInhaling)
+        }
+        .onAppear {
+            animationStartDate = Date()
         }
     }
 
@@ -96,7 +112,7 @@ private struct BreathingLoadingBar: View {
                     .frame(width: 54 + amount * 186, height: 6)
             }
 
-            Text(isInhaling ? "WIPE IN" : "WIPE OUT")
+            Text(isInhaling ? "WAX ON" : "WAX OFF")
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .foregroundStyle(muted)
         }
@@ -114,7 +130,7 @@ private struct AnimatedCleaningScene: View {
     var body: some View {
         ZStack {
             stationaryGround
-                .offset(y: 84)
+                .offset(y: 82)
 
             characterFrame(frame)
                 .opacity(1 - transitionProgress)
@@ -122,7 +138,7 @@ private struct AnimatedCleaningScene: View {
             characterFrame(nextFrame)
                 .opacity(transitionProgress)
         }
-        .frame(width: 360, height: 220)
+        .frame(width: 340, height: 220)
         .clipped()
     }
 
@@ -130,7 +146,7 @@ private struct AnimatedCleaningScene: View {
         ZStack(alignment: .leading) {
             Rectangle()
                 .fill(ink.opacity(0.95))
-                .frame(width: 320, height: 2)
+                .frame(width: 300, height: 2)
 
             HStack(spacing: 10) {
                 ForEach(0..<25, id: \.self) { _ in
@@ -142,13 +158,13 @@ private struct AnimatedCleaningScene: View {
             }
             .offset(x: 3, y: 6)
         }
-        .frame(width: 320, alignment: .leading)
+        .frame(width: 300, alignment: .leading)
     }
 
     private func characterFrame(_ frame: Int) -> some View {
         SpriteSheetFrame(frame: frame)
-            .frame(width: 286, height: 286)
-            .offset(y: -18)
+            .frame(width: 212, height: 212)
+            .offset(y: -4)
     }
 }
 

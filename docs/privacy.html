@@ -15,13 +15,14 @@
     </section>
     <section>
       <h2>Local file access</h2>
-      <p>The app uses the standard macOS folder picker to request access to a folder you select. It reads local file names, sizes, types, and modification dates only to build the cleanup plan you requested. This information remains on your Mac.</p>
+      <p>The app uses the standard macOS folder picker to request access to your Home folder. It reads local file names, sizes, types, available disk space, and modification dates only to build the cleanup plan you requested. This information remains on your Mac.</p>
       <p>A security-scoped bookmark is stored in the app's sandbox container so macOS can remember your folder choice. Removing the app's local container data removes this bookmark.</p>
+      <p>The app rejects system folders, <code>/Users</code>, other user folders, and lookalike folders. It does not ask for administrator privileges or Full Disk Access.</p>
       <p>The app does not scan project folders. It stores optional cleanup-history receipts containing aggregate byte counts, dates, cleanup mode, and hashed candidate identifiers. It does not store file contents or complete cleanup file lists.</p>
     </section>
     <section>
       <h2>Changes to files</h2>
-      <p>No file is changed during analysis. The app modifies only selected eligible items after confirmation. LEFTOVERS are moved to Trash and remain recoverable until you empty Trash.</p>
+      <p>No file is changed during analysis. The app modifies only selected eligible items after confirmation. APPLICATION LEFTOVERS are moved to Trash and remain recoverable until you empty Trash.</p>
       <p>Protected personal folders such as Downloads, Desktop, Documents, Pictures, Movies, and Music are not scanned.</p>
     </section>
     <section>

@@ -3,7 +3,7 @@
 ## Identity
 
 - **Name:** Wax on/Wax off
-- **Subtitle:** Safe cache and disk cleanup
+- **Subtitle:** Local cache and disk cleanup
 - **Bundle ID:** `com.jannis.waxonwaxoff`
 - **Apple ID:** `6781851327`
 - **SKU:** `WAXONWAXOFF-MAC-001`
@@ -16,12 +16,12 @@
 
 ## Promotional Text
 
-Choose LOW, MID, HIGH, or LEFTOVERS. Review exact candidates, safety checks, and local reclaim history. Remove only what you approve. Everything stays on your Mac.
+Choose LOW, MID, HIGH, or APP LEFTOVERS. Review exact candidates, safety checks, and local reclaim history. Remove only what you approve. Everything stays on your Mac.
 
 ## Keywords
 
 ```text
-storage,space,logs,leftovers,uninstaller,xcode,developer,temp,junk,analysis
+storage,space,logs,leftovers,uninstaller,xcode,developer,temp,cleanup,analysis
 ```
 
 ## Description
@@ -33,27 +33,29 @@ FOUR CLEAR MODES
 • LOW finds old caches, logs, and crash reports using a conservative 30-day rule.
 • MID adds known re-downloadable app caches using a 14-day rule, including closed-app Chrome and Spotify disk caches while preserving profiles and persistent storage.
 • HIGH adds developer/package caches and closed-app render caches. Every HIGH-only action starts unchecked, and MID is recommended when the additional immediate cleanup is under 1 GB.
-• LEFTOVERS finds old app data that no longer matches an installed app. Nothing is preselected, and approved items move to Trash.
+• APPLICATION LEFTOVERS finds old app data that no longer matches an installed app. Nothing is preselected, and selected items move to Trash.
 
 REVIEW BEFORE REMOVE
 
-Analysis never deletes files. Every result shows its category, risk level, item count, estimated size, and available local cleanup history. HIGH-only caches start unchecked.
+Analysis never removes files. Every result shows its category, review badge, item count, estimated size, and available local cleanup history. HIGH-only caches start unchecked.
 
-PROVEN CLEAN MEMORY
+LOCAL CLEANUP HISTORY
 
-After a direct cleanup, the app stores a small local receipt with aggregate sizes and a hashed candidate ID. On a later scan it can show how much remains reclaimed. Results distinguish permanently deleted bytes from items moved to Trash and show the system-reported available-space change.
+After a direct cleanup, the app stores a small local receipt with aggregate sizes and a hashed candidate ID. On a later scan it can show how much remains reclaimed. Results distinguish directly removed bytes from items moved to Trash and show the system-reported available-space change.
 
 BUILT FOR SAFETY
 
 • Uses the macOS App Sandbox and a folder you explicitly approve.
+• Accepts only the signed-in user's Home folder through the standard macOS folder picker.
+• Does not request administrator privileges, Full Disk Access, or system-folder access.
 • Revalidates paths immediately before cleanup.
 • Rejects symlinked paths and anything outside the approved folder.
 • Skips known app caches while the owning app is open.
-• Never scans or deletes project folders.
-• Moves approved leftovers to Trash.
+• Never scans or removes project folders.
+• Moves selected Application Leftovers to Trash.
 • Keeps personal documents and protected system files out of cleanup plans.
 • Does not scan Downloads, Desktop, Documents, Pictures, Movies, or Music.
-• Leaves device backups, Xcode archives/runtimes, AI models, Docker data, Trash, and Time Machine snapshots as manual recommendations.
+• Does not show device backups, Xcode archives/runtimes, AI models, Docker data, Trash, or Time Machine snapshots as cleanup issues.
 
 PRIVATE BY DESIGN
 
@@ -63,7 +65,7 @@ Requires macOS 14 or later.
 
 ## Version 1.0 “What’s New”
 
-Initial release with LOW, MID, HIGH, and LEFTOVERS; read-only analysis; an unchecked HIGH approval queue; local reclaim memory; sandboxed folder access; and confirmation before every change.
+Initial release with LOW, MID, HIGH, and APP LEFTOVERS; read-only analysis; an unchecked HIGH approval queue; local cleanup history; sandboxed folder access; Demo Mode; and confirmation before every change.
 
 ## URLs
 

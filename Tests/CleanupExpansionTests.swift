@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import WaxOnWaxOff
 
@@ -104,6 +105,29 @@ final class CleanupExpansionTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: installer.path))
     }
 
+    func testHighDoesNotSurfaceManualSystemAreasAsCleanupIssues() async throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let backup = home.appendingPathComponent("Library/Application Support/MobileSync/Backup/Device", isDirectory: true)
+        let model = home.appendingPathComponent(".cache/huggingface/hub/model", isDirectory: true)
+        let docker = home.appendingPathComponent("Library/Containers/com.docker.docker/Data/vms/0/data", isDirectory: true)
+        for directory in [backup, model, docker] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data(repeating: 8, count: 4_096).write(to: directory.appendingPathComponent("data.bin"))
+        }
+
+        let report = await CleanupEngine().analyze(mode: .high, home: home, runningBundleIDs: [])
+        let labels = Set(report.candidates.map(\.label))
+
+        XCTAssertFalse(report.candidates.contains { $0.id.hasPrefix("manual-") })
+        XCTAssertFalse(labels.contains("iPhone and iPad backups"))
+        XCTAssertFalse(labels.contains("Downloaded AI models"))
+        XCTAssertFalse(labels.contains("Docker data"))
+        XCTAssertFalse(labels.contains("Trash"))
+        XCTAssertFalse(labels.contains("Time Machine local snapshots"))
+    }
+
     func testMavenCleanupPreservesLocallyInstalledArtifact() async throws {
         let home = try temporaryHome()
         defer { try? FileManager.default.removeItem(at: home) }
@@ -139,7 +163,11 @@ final class CleanupExpansionTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: alternate) }
 
         let manager = FolderAccessManager()
-        let accountHome = FileManager.default.homeDirectoryForCurrentUser
+        let accountHomePath = getpwuid(getuid()).flatMap { entry -> String? in
+            guard let directory = entry.pointee.pw_dir else { return nil }
+            return String(cString: directory)
+        } ?? NSHomeDirectory()
+        let accountHome = URL(fileURLWithPath: accountHomePath, isDirectory: true)
         XCTAssertTrue(manager.isExpectedHomeSelection(accountHome))
         let dataVolumeHome = URL(fileURLWithPath: "/System/Volumes/Data" + accountHome.path, isDirectory: true)
         if FileManager.default.fileExists(atPath: dataVolumeHome.path) {
@@ -202,7 +230,7 @@ final class CleanupExpansionTests: XCTestCase {
             detail: "Test",
             size: 300,
             itemCount: 1,
-            risk: .confirm,
+            badge: .confirm,
             defaultSelected: true,
             operation: .recommendation,
             currentFootprint: 300
@@ -212,6 +240,170 @@ final class CleanupExpansionTests: XCTestCase {
         XCTAssertEqual(enriched.reclaimEvidence?.retainedPercent, 80)
         let serialized = try String(contentsOf: historyURL, encoding: .utf8)
         XCTAssertFalse(serialized.contains("/Users/"))
+    }
+
+    @MainActor
+    func testDemoModeUsesSampleDataAndDoesNotRequireFileAccess() {
+        let model = AppModel(demoActivityDelay: 0)
+
+        XCTAssertEqual(model.phase, .launchChoice)
+
+        model.openDemoMode()
+
+        XCTAssertTrue(model.isDemoMode)
+        XCTAssertEqual(model.phase, .demoMode)
+        XCTAssertEqual(model.demoStep, .intro)
+        XCTAssertEqual(model.runTitle, "CHOOSE PRACTICE MODE")
+        XCTAssertFalse(model.canRun)
+
+        model.selectDemoMode(.low)
+
+        XCTAssertEqual(model.phase, .reviewReady)
+        XCTAssertEqual(model.demoStep, .low)
+        XCTAssertEqual(model.selectedMode, .low)
+        XCTAssertFalse(model.candidates.isEmpty)
+        XCTAssertTrue(model.warnings.contains { $0.contains("No real files are scanned") })
+        XCTAssertTrue(model.canRun)
+        XCTAssertEqual(model.runTitle, "APPLY SELECTED CLEANUP")
+
+        model.runPrimaryAction()
+
+        XCTAssertEqual(model.phase, .cleanupComplete)
+        XCTAssertEqual(model.demoStep, .complete)
+        XCTAssertEqual(model.result?.removedBytes, 0)
+        XCTAssertGreaterThan(model.result?.recycledBytes ?? 0, 0)
+        XCTAssertTrue(model.guidanceMessage.contains("No real files"))
+
+        model.skipToFullVersion()
+
+        XCTAssertFalse(model.isDemoMode)
+        XCTAssertTrue(model.phase == .idle || model.phase == .readyToAnalyze)
+        XCTAssertNotEqual(model.phase, .selectingFolder)
+        XCTAssertNotEqual(model.phase, .analyzing)
+        XCTAssertTrue(model.candidates.isEmpty)
+    }
+
+    @MainActor
+    func testDemoModeIncludesAllModesAndLeftoversStartUnchecked() {
+        let model = AppModel(demoActivityDelay: 0)
+
+        model.openDemoMode()
+        for mode in CleanupMode.allCases {
+            model.selectDemoMode(mode)
+            XCTAssertTrue(model.isDemoMode)
+            XCTAssertEqual(model.demoStep.mode, mode)
+            XCTAssertEqual(model.selectedMode, mode)
+            XCTAssertFalse(model.candidates.isEmpty, "\(mode.title) should have demo candidates")
+            if mode == .leftovers {
+                XCTAssertEqual(model.phase, .analysisComplete)
+                XCTAssertTrue(model.selectedCandidateIDs.isEmpty)
+                XCTAssertTrue(model.candidates.allSatisfy { !$0.defaultSelected })
+                XCTAssertEqual(model.runTitle, "SELECT ITEMS TO CONTINUE")
+                model.toggleCandidate(model.candidates[0].id)
+                XCTAssertEqual(model.runTitle, "MOVE SELECTED TO TRASH")
+            } else {
+                XCTAssertEqual(model.phase, .reviewReady)
+                XCTAssertEqual(model.runTitle, "APPLY SELECTED CLEANUP")
+            }
+        }
+    }
+
+    func testCopyUsesDeleteConfirmationAndNeutralScanText() throws {
+        XCTAssertEqual(AppModel.highConfirmationPhrase, "DELETE")
+
+        let forbidden = [
+            "APPLY" + " HIGH",
+            ["APPLY", "PRACTICE", "CLEANUP"].joined(separator: " "),
+            "Nothing is " + "being deleted",
+            "Read-only analysis in progress",
+            "ANALYSIS / READ ONLY"
+        ]
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let files = try sourceFiles(
+            under: ["App", "Store", "docs", "README.md"].map {
+                repoRoot.appendingPathComponent($0)
+            }
+        )
+
+        for file in files {
+            let contents = try String(contentsOf: file, encoding: .utf8)
+            for phrase in forbidden {
+                XCTAssertFalse(
+                    contents.localizedCaseInsensitiveContains(phrase),
+                    "\(phrase) should not appear in \(file.path)"
+                )
+            }
+        }
+    }
+
+    func testApplicationLeftoversGroupsBundleIDEvidenceAndStartsUnchecked() async throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let bundleID = "com.example.oldapp"
+        let evidenceURLs = try [
+            makeEvidenceDirectory("Library/Caches/\(bundleID)", home: home),
+            makeEvidenceFile("Library/Preferences/\(bundleID).plist", home: home),
+            makeEvidenceDirectory("Library/Saved Application State/\(bundleID).savedState", home: home),
+            makeEvidenceDirectory("Library/Containers/\(bundleID)", home: home),
+            makeEvidenceDirectory("Library/Application Support/\(bundleID)", home: home),
+            makeEvidenceDirectory("Library/Group Containers/group.\(bundleID)", home: home),
+        ]
+
+        let report = await CleanupEngine().analyze(mode: .leftovers, home: home, runningBundleIDs: [])
+        let candidate = try XCTUnwrap(report.candidates.first { $0.label == bundleID })
+
+        XCTAssertFalse(candidate.defaultSelected)
+        XCTAssertEqual(candidate.itemCount, evidenceURLs.count)
+        XCTAssertGreaterThanOrEqual(candidate.size, 1_000_000)
+        XCTAssertTrue(candidate.detail.contains("Missing installed app for \(bundleID)"))
+        XCTAssertTrue(candidate.detail.contains("~/Library/"))
+        XCTAssertTrue(candidate.detail.contains("moves to Trash if selected"))
+        guard case let .recycle(urls) = candidate.operation else {
+            return XCTFail("Application Leftovers should move selected items to Trash")
+        }
+        XCTAssertEqual(
+            Set(urls.map(\.standardizedFileURL)),
+            Set(evidenceURLs.map(\.standardizedFileURL))
+        )
+    }
+
+    func testApplicationLeftoversRejectsUnsafeOrUnclearEvidence() async throws {
+        let home = try temporaryHome()
+        let outside = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WaxOnWaxOffOutside-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: home)
+            try? FileManager.default.removeItem(at: outside)
+        }
+
+        try makeEvidenceDirectory("Library/Caches/com.example.installed", home: home)
+        try makeInstalledApp(bundleID: "com.example.installed", home: home)
+        try makeEvidenceDirectory("Library/Caches/com.example.running", home: home)
+        try makeEvidenceDirectory("Library/Caches/com.apple.oldapp", home: home)
+        try makeEvidenceDirectory("Library/Caches/com.example.young", home: home, ageDays: 5)
+        try makeEvidenceDirectory("Library/Caches/com.example.small", home: home, bytes: 512)
+        try makeEvidenceDirectory("Library/Application Support/Old Example App", home: home)
+        try makeEvidenceDirectory("Library/Group Containers/group.com.example.lonely", home: home)
+
+        let symlinkDirectory = home.appendingPathComponent("Library/Caches/com.example.symlink", isDirectory: true)
+        try FileManager.default.createDirectory(at: symlinkDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try Data(repeating: 2, count: 1_100_000).write(to: outside.appendingPathComponent("outside.bin"))
+        try FileManager.default.createSymbolicLink(
+            at: symlinkDirectory.appendingPathComponent("outside-link"),
+            withDestinationURL: outside
+        )
+        try setAge(days: 80, for: symlinkDirectory)
+
+        let report = await CleanupEngine().analyze(
+            mode: .leftovers,
+            home: home,
+            runningBundleIDs: ["com.example.running.helper"]
+        )
+
+        XCTAssertTrue(report.candidates.isEmpty)
     }
 
     private func temporaryHome() throws -> URL {
@@ -226,5 +418,79 @@ final class CleanupExpansionTests: XCTestCase {
             [.modificationDate: Date(timeIntervalSinceNow: TimeInterval(-days * 86_400))],
             ofItemAtPath: url.path
         )
+    }
+
+    @discardableResult
+    private func makeEvidenceDirectory(
+        _ relativePath: String,
+        home: URL,
+        ageDays: Int = 80,
+        bytes: Int = 256_000
+    ) throws -> URL {
+        let directory = home.appendingPathComponent(relativePath, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("data.bin")
+        try Data(repeating: 1, count: bytes).write(to: file)
+        try setAge(days: ageDays, for: file)
+        try setAge(days: ageDays, for: directory)
+        return directory
+    }
+
+    @discardableResult
+    private func makeEvidenceFile(
+        _ relativePath: String,
+        home: URL,
+        ageDays: Int = 80,
+        bytes: Int = 256_000
+    ) throws -> URL {
+        let file = home.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(repeating: 1, count: bytes).write(to: file)
+        try setAge(days: ageDays, for: file)
+        return file
+    }
+
+    private func makeInstalledApp(bundleID: String, home: URL) throws {
+        let contents = home.appendingPathComponent("Applications/Installed.app/Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>CFBundleIdentifier</key>
+            <string>\(bundleID)</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+        </dict>
+        </plist>
+        """
+        try plist.write(to: contents.appendingPathComponent("Info.plist"), atomically: true, encoding: .utf8)
+    }
+
+    private func sourceFiles(under roots: [URL]) throws -> [URL] {
+        var files: [URL] = []
+        for root in roots {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory) else { continue }
+            if !isDirectory.boolValue {
+                files.append(root)
+                continue
+            }
+            guard let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else { continue }
+            for case let file as URL in enumerator {
+                let ext = file.pathExtension.lowercased()
+                guard ["swift", "md", "html"].contains(ext) else { continue }
+                files.append(file)
+            }
+        }
+        return files
     }
 }
