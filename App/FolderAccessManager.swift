@@ -3,7 +3,14 @@ import Darwin
 import Foundation
 
 @MainActor
-final class FolderAccessManager {
+protocol FolderAccessManaging {
+    func authorizedHome() -> URL?
+    func requestHomeFolder() -> URL?
+    func resetAuthorization()
+}
+
+@MainActor
+final class FolderAccessManager: FolderAccessManaging {
     private let bookmarkFileName = "authorized-home.bookmark"
     private let accountHomeDirectory: URL
 

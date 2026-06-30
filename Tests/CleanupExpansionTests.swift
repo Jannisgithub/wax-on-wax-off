@@ -3,6 +3,37 @@ import XCTest
 @testable import WaxOnWaxOff
 
 final class CleanupExpansionTests: XCTestCase {
+    private func isolatedDefaults() -> UserDefaults {
+        let suiteName = "com.jannis.waxonwaxoff.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
+    }
+
+    @MainActor
+    private final class RecordingFolderAccessManager: FolderAccessManaging {
+        private let savedHome: URL?
+        private let selectedHome: URL?
+        private(set) var requestHomeFolderCallCount = 0
+
+        init(savedHome: URL? = nil, selectedHome: URL? = nil) {
+            self.savedHome = savedHome
+            self.selectedHome = selectedHome
+        }
+
+        func authorizedHome() -> URL? {
+            savedHome
+        }
+
+        func requestHomeFolder() -> URL? {
+            requestHomeFolderCallCount += 1
+            return selectedHome
+        }
+
+        func resetAuthorization() {}
+    }
+
+
     func testHighPolicyAddsBroaderCachesWithUncertainTargetsUnchecked() {
         let targets = Dictionary(uniqueKeysWithValues: CleanupPolicy.targets(for: .high).map { ($0.id, $0) })
         XCTAssertNotNil(targets["yarn-cache"])
@@ -244,7 +275,11 @@ final class CleanupExpansionTests: XCTestCase {
 
     @MainActor
     func testDemoModeUsesSampleDataAndDoesNotRequireFileAccess() {
-        let model = AppModel(demoActivityDelay: 0)
+        let model = AppModel(
+            demoActivityDelay: 0,
+            userDefaults: isolatedDefaults(),
+            accessManager: RecordingFolderAccessManager()
+        )
 
         XCTAssertEqual(model.phase, .launchChoice)
 
@@ -285,7 +320,11 @@ final class CleanupExpansionTests: XCTestCase {
 
     @MainActor
     func testDemoModeIncludesAllModesAndLeftoversStartUnchecked() {
-        let model = AppModel(demoActivityDelay: 0)
+        let model = AppModel(
+            demoActivityDelay: 0,
+            userDefaults: isolatedDefaults(),
+            accessManager: RecordingFolderAccessManager()
+        )
 
         model.openDemoMode()
         for mode in CleanupMode.allCases {
@@ -308,12 +347,85 @@ final class CleanupExpansionTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testLaunchChoiceIsShownOnlyUntilUserChoosesPath() {
+        let defaults = isolatedDefaults()
+        let firstLaunch = AppModel(
+            demoActivityDelay: 0,
+            userDefaults: defaults,
+            accessManager: RecordingFolderAccessManager()
+        )
+
+        XCTAssertEqual(firstLaunch.phase, .launchChoice)
+
+        firstLaunch.openDemoMode()
+
+        let laterLaunch = AppModel(
+            demoActivityDelay: 0,
+            userDefaults: defaults,
+            accessManager: RecordingFolderAccessManager()
+        )
+        XCTAssertNotEqual(laterLaunch.phase, .launchChoice)
+        XCTAssertFalse(laterLaunch.isDemoMode)
+        XCTAssertTrue(laterLaunch.phase == .idle || laterLaunch.phase == .readyToAnalyze)
+    }
+
+    @MainActor
+    func testSavedHomeApprovalSkipsLaunchChoice() throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let accessManager = RecordingFolderAccessManager(savedHome: home)
+        let model = AppModel(
+            demoActivityDelay: 0,
+            userDefaults: isolatedDefaults(),
+            accessManager: accessManager
+        )
+
+        XCTAssertEqual(model.phase, .readyToAnalyze)
+        XCTAssertFalse(model.isDemoMode)
+    }
+
+    @MainActor
+    func testRealAnalysisRequestsHomeFolderWhenNoSavedApproval() throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let accessManager = RecordingFolderAccessManager(selectedHome: home)
+        let model = AppModel(
+            demoActivityDelay: 0,
+            userDefaults: isolatedDefaults(),
+            accessManager: accessManager
+        )
+
+        model.runRealAnalysis()
+
+        XCTAssertEqual(accessManager.requestHomeFolderCallCount, 1)
+        XCTAssertNotEqual(model.phase, .selectingFolder)
+    }
+
+    @MainActor
+    func testRealAnalysisUsesSavedHomeWithoutAskingAgain() throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let accessManager = RecordingFolderAccessManager(savedHome: home)
+        let model = AppModel(
+            demoActivityDelay: 0,
+            userDefaults: isolatedDefaults(),
+            accessManager: accessManager
+        )
+
+        model.runRealAnalysis()
+
+        XCTAssertEqual(accessManager.requestHomeFolderCallCount, 0)
+        XCTAssertNotEqual(model.phase, .selectingFolder)
+    }
+
     func testCopyUsesDeleteConfirmationAndNeutralScanText() throws {
         XCTAssertEqual(AppModel.highConfirmationPhrase, "DELETE")
 
         let forbidden = [
             "APPLY" + " HIGH",
             ["APPLY", "PRACTICE", "CLEANUP"].joined(separator: " "),
+            "Choose your Home folder once",
             "Nothing is " + "being deleted",
             "Read-only analysis in progress",
             "ANALYSIS / READ ONLY"

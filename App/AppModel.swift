@@ -6,6 +6,7 @@ import OSLog
 @MainActor
 final class AppModel: ObservableObject {
     nonisolated static let highConfirmationPhrase = "DELETE"
+    private static let launchChoiceSeenKey = "has-seen-launch-choice-v1"
 
     @Published var selectedMode: CleanupMode = .mid
     @Published var phase: AppPhase = .launchChoice
@@ -18,18 +19,29 @@ final class AppModel: ObservableObject {
     @Published var guidanceMessage = "Choose the path: true focus (Full Version) or practice first (Demo)."
     @Published var activityItem = ""
 
-    private let accessManager = FolderAccessManager()
+    private let accessManager: FolderAccessManaging
     private let engine = CleanupEngine()
     private let historyStore = ReclaimHistoryStore()
     private let minimumActivityDuration: TimeInterval = 2.4
     private let demoActivityDelay: TimeInterval
+    private let userDefaults: UserDefaults
     private let logger = Logger(subsystem: "com.jannis.waxonwaxoff", category: "ReviewFlow")
     private let currentUserID = getuid()
     private var authorizedHome: URL?
     private var analysisGeneration = 0
 
-    init(demoActivityDelay: TimeInterval = 0.8) {
+    init(
+        demoActivityDelay: TimeInterval = 0.8,
+        userDefaults: UserDefaults = .standard,
+        accessManager: FolderAccessManaging = FolderAccessManager()
+    ) {
         self.demoActivityDelay = demoActivityDelay
+        self.userDefaults = userDefaults
+        self.accessManager = accessManager
+        if userDefaults.bool(forKey: Self.launchChoiceSeenKey) || accessManager.authorizedHome() != nil {
+            markLaunchChoiceSeen()
+            restoreNormalLaunchState()
+        }
 #if DEBUG
         configureScreenshotStateIfRequested()
 #endif
@@ -119,7 +131,7 @@ final class AppModel: ObservableObject {
             guidanceMessage = "Ready. Choose a cleanup mode and run analysis."
         } else {
             phase = .idle
-            guidanceMessage = "Wax On, Wax Off. We review what is cluttered before we remove. The mind decides."
+            guidanceMessage = "Select a cleanup mode and run analysis."
         }
     }
 
@@ -143,14 +155,17 @@ final class AppModel: ObservableObject {
 
     func skipToFullVersion() {
         analysisGeneration += 1
+        markLaunchChoiceSeen()
         isDemoMode = false
         demoStep = .intro
         clearScanState()
-        guidanceMessage = "True focus chosen. Select your method, reveal the hidden, then clear the mind."
         if authorizedHome == nil {
             authorizedHome = accessManager.authorizedHome()
         }
         phase = authorizedHome == nil ? .idle : .readyToAnalyze
+        guidanceMessage = authorizedHome == nil
+            ? "Select a cleanup mode and run analysis."
+            : "Ready. Choose a cleanup mode and run analysis."
     }
 
     func startDemoScan() {
@@ -161,6 +176,7 @@ final class AppModel: ObservableObject {
     func startDemoWorkflow() {
         guard phase != .selectingFolder && phase != .analyzing && phase != .cleaning else { return }
         analysisGeneration += 1
+        markLaunchChoiceSeen()
         isDemoMode = true
         demoStep = .intro
         clearScanState()
@@ -237,6 +253,21 @@ final class AppModel: ObservableObject {
             return
         }
         startAnalysis(with: home, source: "folder picker")
+    }
+
+    private func markLaunchChoiceSeen() {
+        userDefaults.set(true, forKey: Self.launchChoiceSeenKey)
+    }
+
+    private func restoreNormalLaunchState() {
+        if let home = authorizedHome ?? accessManager.authorizedHome() {
+            authorizedHome = home
+            phase = .readyToAnalyze
+            guidanceMessage = "Ready. Choose a cleanup mode and run analysis."
+        } else {
+            phase = .idle
+            guidanceMessage = "Select a cleanup mode and run analysis."
+        }
     }
 
     private func startAnalysis(with home: URL, source: String) {

@@ -81,9 +81,6 @@ struct MainView: View {
             if model.isDemoMode {
                 Text("Demo uses sample data only. No real files are scanned, moved, or deleted.")
                     .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text("Choose your Home folder once. WaxOnWaxOff checks cleanup areas only.")
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -195,7 +192,7 @@ struct MainView: View {
             Spacer(minLength: 0)
             Text("Choose Your Path")
                 .font(.system(size: 28, weight: .black, design: .monospaced))
-            Text("Practice with sample data, or enter the full version and scan your own Home folder.")
+            Text("Practice with sample data, or start a real cleanup review.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(muted)
                 .padding(.horizontal, 60)
@@ -212,7 +209,7 @@ struct MainView: View {
                 launchChoiceOption(
                     eyebrow: "FULL VERSION",
                     title: "Scan My Mac",
-                    detail: "Choose your Home folder, review the plan, then approve changes.",
+                    detail: "Review the plan, then approve changes.",
                     actionTitle: "Open Full Version"
                 ) {
                     model.skipToFullVersion()
@@ -277,7 +274,7 @@ struct MainView: View {
             Text("03  REVIEW THE EXACT PLAN")
             Text("04  CONFIRM SELECTED PLAN")
             Divider().overlay(muted)
-            Text("Choose your Home folder to start. WaxOnWaxOff checks cleanup areas inside it and asks before removing anything.")
+            Text("Select a mode, review the plan, approve changes.")
                 .foregroundStyle(muted)
             Button("Select Home Folder") {
                 model.runRealAnalysis()
