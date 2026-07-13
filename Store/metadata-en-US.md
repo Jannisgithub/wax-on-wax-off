@@ -31,13 +31,13 @@ Wax on/Wax off helps you reclaim storage without turning cleanup into guesswork.
 FOUR CLEAR MODES
 
 • LOW finds old caches, logs, and crash reports using a conservative 30-day rule.
-• MID adds known re-downloadable app caches using a 14-day rule, including closed-app Chrome and Spotify disk caches while preserving profiles and persistent storage.
-• HIGH adds developer/package caches and closed-app render caches. Every HIGH-only action starts unchecked, and MID is recommended when the additional immediate cleanup is under 1 GB.
+• MID adds expanded closed-app browser, media, and communication caches using a 14-day rule while preserving profiles and persistent storage.
+• HIGH adds reviewed developer/package caches, third-party sandbox cache/log/temp files, and closed-app render caches. It ranks reclaim value, keeps uncertain tool data out of smart selection, requires typed confirmation, and recommends MID when the additional immediate cleanup is under 1 GB.
 • APPLICATION LEFTOVERS finds old app data that no longer matches an installed app. Nothing is preselected, and selected items move to Trash.
 
 REVIEW BEFORE REMOVE
 
-Analysis never removes files. Every result shows its category, review badge, item count, estimated size, and available local cleanup history. HIGH-only caches start unchecked.
+Analysis never removes files. Every result shows its category, review badge, item count, estimated size, and available local cleanup history. HIGH cleanup requires typed confirmation before removal.
 
 LOCAL CLEANUP HISTORY
 
@@ -55,7 +55,7 @@ BUILT FOR SAFETY
 • Moves selected Application Leftovers to Trash.
 • Keeps personal documents and protected system files out of cleanup plans.
 • Does not scan Downloads, Desktop, Documents, Pictures, Movies, or Music.
-• Does not show device backups, Xcode archives/runtimes, AI models, Docker data, Trash, or Time Machine snapshots as cleanup issues.
+• Never treats device backups, Xcode archives/runtimes, language packs, universal binaries, Rosetta files, Siri or Apple Intelligence assets, AI model libraries, Docker data, Trash, or Time Machine snapshots as automatic cleanup issues.
 
 PRIVATE BY DESIGN
 
@@ -65,7 +65,7 @@ Requires macOS 14 or later.
 
 ## Version 1.0 “What’s New”
 
-Initial release with LOW, MID, HIGH, and APP LEFTOVERS; read-only analysis; an unchecked HIGH approval queue; local cleanup history; sandboxed folder access; Demo Mode; and confirmation before every change.
+Initial release with LOW, MID, HIGH, and APP LEFTOVERS; read-only analysis; HIGH typed confirmation; local cleanup history; sandboxed folder access; Demo Mode; and confirmation before every change.
 
 ## URLs
 

@@ -17,8 +17,13 @@ final class CleanupPolicyTests: XCTestCase {
     func testHighAddsDeveloperCaches() {
         let ids = Set(CleanupPolicy.targets(for: .high).map(\.id))
         XCTAssertTrue(ids.contains("chrome-models"))
+        XCTAssertTrue(ids.contains("firefox-disk-cache"))
         XCTAssertTrue(ids.contains("xcode-derived"))
+        XCTAssertTrue(ids.contains("xcode-ios-device-support"))
         XCTAssertTrue(ids.contains("npm-cache"))
+        XCTAssertTrue(ids.contains("uv-cache"))
+        XCTAssertTrue(ids.contains("bazel-cache"))
+        XCTAssertTrue(ids.contains("nuget-packages"))
     }
 
     func testModeAgeRules() {
@@ -71,9 +76,11 @@ final class CleanupPolicyTests: XCTestCase {
         let report = await engine.analyze(mode: .low, home: home, runningBundleIDs: [])
         XCTAssertEqual(report.candidates.map(\.id), ["user-caches"])
         XCTAssertEqual(report.candidates.first?.itemCount, 1)
+        XCTAssertEqual(report.candidates.first?.currentFootprint, report.candidates.first?.size)
 
         let result = await engine.apply(candidates: report.candidates, home: home)
         XCTAssertEqual(result.removedItems, 1)
+        XCTAssertEqual(result.outcomes.first?.remainingFootprint, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: oldFile.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: recentFile.path))
     }

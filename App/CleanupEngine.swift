@@ -26,6 +26,21 @@ private struct LeftoverPathEvidence {
     let size: Int64
 }
 
+private struct AgedFileEvidence {
+    let url: URL
+    let size: Int64
+    let ageDays: Int
+}
+
+private struct OwnedTreeMeasurement {
+    let files: [AgedFileEvidence]
+    let hasSkippedFiles: Bool
+
+    var size: Int64 {
+        files.reduce(Int64(0)) { $0 + $1.size }
+    }
+}
+
 actor CleanupEngine {
     private let fileManager = FileManager.default
     private let currentUserID = getuid()
@@ -36,11 +51,19 @@ actor CleanupEngine {
         runningBundleIDs: Set<String>,
         progress: CleanupProgressUpdate? = nil
     ) async -> AnalysisReport {
+        let analyzedAt = Date()
         guard mode != .leftovers else {
-            return await analyzeLeftovers(home: home, runningBundleIDs: runningBundleIDs, progress: progress)
+            return await analyzeLeftovers(
+                home: home,
+                runningBundleIDs: runningBundleIDs,
+                analyzedAt: analyzedAt,
+                progress: progress
+            )
         }
 
-        let cutoff = Calendar.current.date(byAdding: .day, value: -mode.ageDays, to: Date()) ?? .distantPast
+        let cutoff = Calendar.current.date(byAdding: .day, value: -mode.ageDays, to: analyzedAt) ?? .distantPast
+        let volumeCapacity = totalCapacity(at: home)
+        let volumeFreeSpace = availableCapacity(at: home)
         var candidates: [CleanupCandidate] = []
         var warnings: [String] = []
 
@@ -69,9 +92,17 @@ actor CleanupEngine {
                 } else {
                     excludedRoots = []
                 }
-                let files = await oldFiles(in: url, cutoff: cutoff, excluding: excludedRoots, home: home, progress: progress)
-                let size = files.reduce(Int64(0)) { $0 + allocatedSize(of: $1) }
+                let files = await oldFileEvidence(
+                    in: url,
+                    cutoff: cutoff,
+                    excluding: excludedRoots,
+                    home: home,
+                    now: analyzedAt,
+                    progress: progress
+                )
+                let size = files.reduce(Int64(0)) { $0 + $1.size }
                 guard size > 0 else { continue }
+                let urls = files.map(\.url)
                 candidates.append(CleanupCandidate(
                     id: target.id,
                     label: target.label,
@@ -81,57 +112,99 @@ actor CleanupEngine {
                     badge: target.badge,
                     defaultSelected: target.defaultSelected,
                     operation: .deleteFiles(DeleteFilesPlan(
-                        urls: files,
+                        urls: urls,
                         cutoff: cutoff,
                         scopeRoot: home,
                         measurementRoot: url,
                         ownerBundleIDs: target.ownerBundleIDs
                     )),
-                    currentFootprint: directorySize(url)
+                    currentFootprint: size,
+                    daysSinceLastAccess: files.map(\.ageDays).max()
                 ))
             case .entireTree:
                 await progress?("Measuring \(target.label) · \(displayPath(url, relativeTo: home))")
-                guard let size = measureTreeIfOwnedByCurrentUser(url), size > 0 else { continue }
-                candidates.append(CleanupCandidate(
-                    id: target.id,
-                    label: target.label,
-                    detail: target.detail,
-                    size: size,
-                    itemCount: 1,
-                    badge: target.badge,
-                    defaultSelected: target.defaultSelected,
-                    operation: .deleteTree(treePlan(
-                        url: url,
-                        scopeRoot: home,
-                        analyzedSize: size,
-                        ownerBundleIDs: target.ownerBundleIDs
-                    )),
-                    currentFootprint: size
-                ))
+                if let size = measureTreeIfOwnedByCurrentUser(url), size > 0 {
+                    candidates.append(CleanupCandidate(
+                        id: target.id,
+                        label: target.label,
+                        detail: target.detail,
+                        size: size,
+                        itemCount: 1,
+                        badge: target.badge,
+                        defaultSelected: target.defaultSelected,
+                        operation: .deleteTree(treePlan(
+                            url: url,
+                            scopeRoot: home,
+                            analyzedSize: size,
+                            ownerBundleIDs: target.ownerBundleIDs
+                        )),
+                        currentFootprint: size,
+                        daysSinceLastAccess: ageDays(of: url, now: analyzedAt)
+                    ))
+                } else if let owned = measureOwnedPortionOfTree(url, now: analyzedAt),
+                          owned.size > 0 {
+                    candidates.append(CleanupCandidate(
+                        id: target.id,
+                        label: target.label,
+                        detail: "\(owned.files.count) owned file(s) • \(target.detail) • Contains files owned by another user; only your files will be removed",
+                        size: owned.size,
+                        itemCount: owned.files.count,
+                        badge: .review,
+                        defaultSelected: false,
+                        operation: .deleteFiles(DeleteFilesPlan(
+                            urls: owned.files.map(\.url),
+                            cutoff: .distantFuture,
+                            scopeRoot: home,
+                            measurementRoot: url,
+                            ownerBundleIDs: target.ownerBundleIDs
+                        )),
+                        currentFootprint: owned.size,
+                        daysSinceLastAccess: owned.files.map(\.ageDays).max(),
+                        hasPartialOwnership: owned.hasSkippedFiles
+                    ))
+                }
             }
         }
 
         if mode == .high {
-            candidates += await analyzeMavenRemoteCache(home: home, cutoff: cutoff, progress: progress)
-            let appCacheReport = await analyzeAppSupportCaches(home: home, runningBundleIDs: runningBundleIDs, progress: progress)
+            candidates += await analyzeMavenRemoteCache(home: home, cutoff: cutoff, analyzedAt: analyzedAt, progress: progress)
+            let appCacheReport = await analyzeAppSupportCaches(
+                home: home,
+                runningBundleIDs: runningBundleIDs,
+                analyzedAt: analyzedAt,
+                progress: progress
+            )
             candidates += appCacheReport.candidates
             warnings += appCacheReport.warnings
+            let sandboxCacheReport = await analyzeSandboxContainerCaches(
+                home: home,
+                cutoff: cutoff,
+                runningBundleIDs: runningBundleIDs,
+                analyzedAt: analyzedAt,
+                progress: progress
+            )
+            candidates += sandboxCacheReport.candidates
+            warnings += sandboxCacheReport.warnings
 
             let midCandidateIDs = Set(CleanupPolicy.targets(for: .mid).map(\.id))
             let additionalBytes = candidates
                 .filter { !midCandidateIDs.contains($0.id) && isImmediateCleanup($0.operation) }
                 .reduce(Int64(0)) { $0 + $1.size }
-            if additionalBytes < 1_000_000_000 {
+            let threshold = highAdditionalCleanupThreshold(freeSpace: volumeFreeSpace)
+            if additionalBytes < threshold {
                 warnings.append("HIGH adds only \(additionalBytes.fileSizeText) beyond safer cleanup. MID is recommended unless you specifically need that space.")
             } else {
-                warnings.append("HIGH found \(additionalBytes.fileSizeText) beyond safer cleanup. Extra items remain unchecked for review.")
+                warnings.append("HIGH found \(additionalBytes.fileSizeText) beyond safer cleanup. High-value extra items are selected for review and still require confirmation.")
             }
         }
 
         return AnalysisReport(
             mode: mode,
             candidates: candidates.sorted(by: candidateOrder),
-            warnings: warnings
+            warnings: warnings,
+            analyzedAt: analyzedAt,
+            volumeCapacity: volumeCapacity,
+            volumeFreeSpace: volumeFreeSpace
         )
     }
 
@@ -181,7 +254,7 @@ actor CleanupEngine {
                         warnings.append("Could not remove \(url.lastPathComponent): \(error.localizedDescription)")
                     }
                 }
-                remainingFootprint = directorySize(plan.measurementRoot)
+                remainingFootprint = remainingPlannedFileFootprint(for: plan)
 
             case let .deleteTree(plan):
                 await progress?("Removing \(displayPath(plan.url, relativeTo: home))")
@@ -256,6 +329,7 @@ actor CleanupEngine {
     private func analyzeAppSupportCaches(
         home: URL,
         runningBundleIDs: Set<String>,
+        analyzedAt: Date,
         progress: CleanupProgressUpdate?
     ) async -> (candidates: [CleanupCandidate], warnings: [String]) {
         let cacheNames: Set<String> = [
@@ -263,6 +337,10 @@ actor CleanupEngine {
         ]
         var candidates: [CleanupCandidate] = []
         var warnings: [String] = []
+
+        let fixedPaths = Set(CleanupPolicy.targets(for: .high).map {
+            home.appendingPathComponent($0.relativePath).standardizedFileURL
+        })
 
         for rule in CleanupPolicy.appSupportCaches {
             await progress?("Checking \(rule.label) · \(displayPath(rule.relativePath))")
@@ -279,15 +357,16 @@ actor CleanupEngine {
             ) else { continue }
 
             var plans: [DeleteTreePlan] = []
-            let fixedPaths = Set(CleanupPolicy.targets(for: .high).map {
-                home.appendingPathComponent($0.relativePath).standardizedFileURL
-            })
+            var checkedCount = 0
             while let url = enumerator.nextObject() as? URL {
                 if enumerator.level > 4 {
                     enumerator.skipDescendants()
                     continue
                 }
-                await progress?("Checking \(displayPath(url, relativeTo: home))")
+                checkedCount += 1
+                if checkedCount == 1 || checkedCount.isMultiple(of: 128) {
+                    await progress?("Checking \(displayPath(url, relativeTo: home))")
+                }
                 guard isDirectory(url), !isSymbolicLink(url) else { continue }
                 guard cacheNames.contains(url.lastPathComponent) else { continue }
                 if fixedPaths.contains(url.standardizedFileURL) {
@@ -320,15 +399,108 @@ actor CleanupEngine {
                 badge: .confirm,
                 defaultSelected: false,
                 operation: .deleteTrees(plans, measurementRoot: root),
-                currentFootprint: size
+                currentFootprint: size,
+                daysSinceLastAccess: plans
+                    .map { ageDays(from: $0.analyzedModificationDate, now: analyzedAt) }
+                    .max()
             ))
         }
+        return (candidates, warnings)
+    }
+
+    private func analyzeSandboxContainerCaches(
+        home: URL,
+        cutoff: Date,
+        runningBundleIDs: Set<String>,
+        analyzedAt: Date,
+        progress: CleanupProgressUpdate?
+    ) async -> (candidates: [CleanupCandidate], warnings: [String]) {
+        let containersRoot = home.appendingPathComponent("Library/Containers", isDirectory: true)
+        await progress?("Checking sandboxed app caches · \(displayPath(containersRoot, relativeTo: home))")
+        guard revalidate(containersRoot, inside: home),
+              isDirectory(containersRoot),
+              isOwnedByCurrentUser(containersRoot),
+              let containers = try? fileManager.contentsOfDirectory(
+                at: containersRoot,
+                includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return ([], [])
+        }
+
+        let cacheRoots = [
+            ("cache", "Data/Library/Caches"),
+            ("log", "Data/Library/Logs"),
+            ("temp", "Data/tmp"),
+        ]
+        var candidates: [CleanupCandidate] = []
+        var warnings: [String] = []
+
+        for container in containers {
+            let bundleID = container.lastPathComponent.lowercased()
+            guard isBundleIdentifier(bundleID),
+                  !isProtectedBundleID(bundleID),
+                  revalidate(container, inside: home),
+                  isDirectory(container),
+                  isOwnedByCurrentUser(container) else {
+                continue
+            }
+            await progress?("Checking \(displayPath(container, relativeTo: home))")
+            guard ownersAreClosed([bundleID], runningBundleIDs: runningBundleIDs) else {
+                warnings.append("Skipped sandbox caches for \(bundleID): close the owning app first.")
+                continue
+            }
+
+            var files: [AgedFileEvidence] = []
+            var usedRootLabels: [String] = []
+            for (rootLabel, relativeRoot) in cacheRoots {
+                let root = container.appendingPathComponent(relativeRoot, isDirectory: true)
+                guard revalidate(root, inside: home), isDirectory(root), isOwnedByCurrentUser(root) else {
+                    continue
+                }
+                let rootFiles = await oldFileEvidence(
+                    in: root,
+                    cutoff: cutoff,
+                    home: home,
+                    now: analyzedAt,
+                    progress: progress
+                )
+                guard !rootFiles.isEmpty else { continue }
+                files += rootFiles
+                usedRootLabels.append(rootLabel)
+            }
+
+            let size = files.reduce(Int64(0)) { $0 + $1.size }
+            guard size > 0 else { continue }
+            let urls = files.map(\.url)
+            let rootSummary = usedRootLabels.sorted().joined(separator: "/")
+            candidates.append(CleanupCandidate(
+                id: "sandbox-cache-\(stableID(bundleID))",
+                label: "Sandbox caches: \(bundleID)",
+                detail: "\(files.count) old \(rootSummary) file(s) • Application Support, preferences, documents, and containers for Apple apps are excluded",
+                size: size,
+                itemCount: files.count,
+                badge: .confirm,
+                defaultSelected: false,
+                operation: .deleteFiles(DeleteFilesPlan(
+                    urls: urls,
+                    cutoff: cutoff,
+                    scopeRoot: home,
+                    measurementRoot: container,
+                    ownerBundleIDs: [bundleID]
+                )),
+                currentFootprint: size,
+                daysSinceLastAccess: files.map(\.ageDays).max()
+            ))
+        }
+
         return (candidates, warnings)
     }
 
     private func analyzeMavenRemoteCache(
         home: URL,
         cutoff: Date,
+        analyzedAt: Date,
         progress: CleanupProgressUpdate?
     ) async -> [CleanupCandidate] {
         let root = home.appendingPathComponent(".m2/repository", isDirectory: true)
@@ -393,17 +565,19 @@ actor CleanupEngine {
                 measurementRoot: root,
                 ownerBundleIDs: []
             )),
-            currentFootprint: directorySize(root)
+            currentFootprint: size,
+            daysSinceLastAccess: oldestAgeDays(of: urls, now: analyzedAt)
         )]
     }
 
     private func analyzeLeftovers(
         home: URL,
         runningBundleIDs: Set<String>,
+        analyzedAt: Date,
         progress: CleanupProgressUpdate?
     ) async -> AnalysisReport {
         let installed = installedBundleIDs(home: home)
-        let now = Date()
+        let now = analyzedAt
         let minimumAge = CleanupMode.leftovers.ageDays
         let primaryRoots = [
             LeftoverScanRoot(relativePath: "Library/Caches", label: "Caches", kind: .bundleDirectory),
@@ -411,6 +585,11 @@ actor CleanupEngine {
             LeftoverScanRoot(relativePath: "Library/Saved Application State", label: "Saved State", kind: .savedStateDirectory),
             LeftoverScanRoot(relativePath: "Library/Containers", label: "Containers", kind: .bundleDirectory),
             LeftoverScanRoot(relativePath: "Library/Application Support", label: "Application Support", kind: .bundleDirectory),
+            LeftoverScanRoot(relativePath: "Library/HTTPStorages", label: "HTTP Storage", kind: .bundleDirectory),
+            LeftoverScanRoot(relativePath: "Library/WebKit", label: "WebKit Data", kind: .bundleDirectory),
+            LeftoverScanRoot(relativePath: "Library/Logs", label: "Logs", kind: .bundleDirectory),
+            LeftoverScanRoot(relativePath: "Library/Application Scripts", label: "App Scripts", kind: .bundleDirectory),
+            LeftoverScanRoot(relativePath: "Library/SyncedPreferences", label: "Synced Preferences", kind: .plistFile),
         ]
         var evidenceByBundleID: [String: [LeftoverPathEvidence]] = [:]
 
@@ -424,7 +603,7 @@ actor CleanupEngine {
                 progress: progress
             )
             for item in evidence {
-                evidenceByBundleID[item.bundleID, default: []].append(item)
+                evidenceByBundleID[canonicalBundleID(item.bundleID), default: []].append(item)
             }
         }
 
@@ -441,18 +620,22 @@ actor CleanupEngine {
             progress: progress
         )
         for item in groupEvidence {
-            evidenceByBundleID[item.bundleID, default: []].append(item)
+            evidenceByBundleID[canonicalBundleID(item.bundleID), default: []].append(item)
         }
 
         var candidates: [CleanupCandidate] = []
-        for (bundleID, evidence) in evidenceByBundleID {
-            guard !bundleID.hasPrefix("com.apple."),
-                  !installed.contains(bundleID),
-                  ownersAreClosed([bundleID], runningBundleIDs: runningBundleIDs) else {
+        for (canonicalID, evidence) in evidenceByBundleID {
+            let bundleID = evidence.first?.bundleID ?? canonicalID
+            guard !isProtectedBundleID(canonicalID),
+                  !installed.contains(canonicalID),
+                  ownersAreClosed([canonicalID], runningBundleIDs: runningBundleIDs) else {
                 continue
             }
             let workspaceMatches = await installedApplicationURLs(for: bundleID)
-            guard workspaceMatches.isEmpty else {
+            let canonicalWorkspaceMatches = canonicalID == canonicalBundleID(bundleID)
+                ? []
+                : await installedApplicationURLs(for: canonicalID)
+            guard workspaceMatches.isEmpty, canonicalWorkspaceMatches.isEmpty else {
                 continue
             }
             let orderedEvidence = evidence.sorted {
@@ -464,8 +647,8 @@ actor CleanupEngine {
             let urls = orderedEvidence.map(\.url)
             let oldestAge = orderedEvidence.map(\.ageDays).max() ?? minimumAge
             candidates.append(CleanupCandidate(
-                id: "leftover-\(stableID(bundleID))",
-                label: bundleID,
+                id: "leftover-\(stableID(canonicalID))",
+                label: displayName(for: bundleID),
                 detail: leftoverDetail(
                     bundleID: bundleID,
                     evidence: orderedEvidence,
@@ -476,14 +659,19 @@ actor CleanupEngine {
                 badge: .confirm,
                 defaultSelected: false,
                 operation: .recycle(urls),
-                currentFootprint: size
+                currentFootprint: size,
+                daysSinceLastAccess: oldestAge,
+                bundleID: bundleID
             ))
         }
 
         return AnalysisReport(
             mode: .leftovers,
             candidates: candidates.sorted { $0.size > $1.size },
-            warnings: ["Application Leftovers are never selected automatically and are moved to Trash, not permanently deleted."]
+            warnings: ["Application Leftovers are never selected automatically and are moved to Trash, not permanently deleted."],
+            analyzedAt: analyzedAt,
+            volumeCapacity: totalCapacity(at: home),
+            volumeFreeSpace: availableCapacity(at: home)
         )
     }
 
@@ -509,9 +697,12 @@ actor CleanupEngine {
             await progress?("Checking \(displayPath(url, relativeTo: home))")
             guard revalidate(url, inside: home),
                   let bundleID = leftoverBundleID(for: url, kind: root.kind),
-                  isBundleIdentifier(bundleID),
-                  allowedBundleIDs?.contains(bundleID) ?? true,
-                  !bundleID.hasPrefix("com.apple.") else {
+                  isBundleIdentifier(bundleID) else {
+                continue
+            }
+            let canonicalID = canonicalBundleID(bundleID)
+            guard allowedBundleIDs?.contains(canonicalID) ?? true,
+                  !isProtectedBundleID(canonicalID) else {
                 continue
             }
             let age = ageDays(of: url, now: now)
@@ -536,20 +727,20 @@ actor CleanupEngine {
         let rawName = url.lastPathComponent
         switch kind {
         case .bundleDirectory:
-            return rawName.lowercased()
+            return rawName
         case .plistFile:
             let suffix = ".plist"
             guard rawName.lowercased().hasSuffix(suffix) else { return nil }
-            return String(rawName.dropLast(suffix.count)).lowercased()
+            return String(rawName.dropLast(suffix.count))
         case .savedStateDirectory:
             let suffix = ".savedState"
             guard rawName.hasSuffix(suffix) else { return nil }
-            return String(rawName.dropLast(suffix.count)).lowercased()
+            return String(rawName.dropLast(suffix.count))
         case .groupContainerDirectory:
             let prefix = "group."
             let lowercased = rawName.lowercased()
             guard lowercased.hasPrefix(prefix) else { return nil }
-            return String(lowercased.dropFirst(prefix.count))
+            return String(rawName.dropFirst(prefix.count))
         }
     }
 
@@ -587,10 +778,13 @@ actor CleanupEngine {
     }
 
     private func validate(_ plan: DeleteTreePlan, runningBundleIDs: Set<String>) -> Bool {
-        ownersAreClosed(plan.ownerBundleIDs, runningBundleIDs: runningBundleIDs)
-            && revalidate(plan.url, inside: plan.scopeRoot)
-            && measureTreeIfOwnedByCurrentUser(plan.url) == plan.analyzedSize
-            && modificationDate(of: plan.url) == plan.analyzedModificationDate
+        guard ownersAreClosed(plan.ownerBundleIDs, runningBundleIDs: runningBundleIDs),
+              revalidate(plan.url, inside: plan.scopeRoot),
+              let currentSize = measureTreeIfOwnedByCurrentUser(plan.url) else {
+            return false
+        }
+        let growthTolerance = max(1_000_000, Int64(Double(plan.analyzedSize) * 0.05))
+        return currentSize <= plan.analyzedSize + growthTolerance
     }
 
     private func ownersAreClosed(
@@ -607,26 +801,45 @@ actor CleanupEngine {
         }
     }
 
-    private func oldFiles(
+    private func remainingPlannedFileFootprint(for plan: DeleteFilesPlan) -> Int64 {
+        plan.urls.reduce(Int64(0)) { partial, url in
+            guard exists(url) else { return partial }
+            return partial + allocatedSize(of: url)
+        }
+    }
+
+    private func oldFileEvidence(
         in root: URL,
         cutoff: Date,
         excluding excludedRoots: [URL] = [],
         home: URL,
+        now: Date,
         progress: CleanupProgressUpdate?
-    ) async -> [URL] {
-        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey]
+    ) async -> [AgedFileEvidence] {
+        let keys: Set<URLResourceKey> = [
+            .isRegularFileKey,
+            .isSymbolicLinkKey,
+            .contentModificationDateKey,
+            .totalFileAllocatedSizeKey,
+            .fileAllocatedSizeKey,
+        ]
         guard let enumerator = fileManager.enumerator(
             at: root,
             includingPropertiesForKeys: Array(keys),
             options: [.skipsPackageDescendants]
         ) else { return [] }
 
-        var result: [URL] = []
+        let excludedPaths = Set(excludedRoots.map { $0.standardizedFileURL.path })
+        var result: [AgedFileEvidence] = []
+        var checkedCount = 0
         while let url = enumerator.nextObject() as? URL {
-            await progress?("Checking \(displayPath(url, relativeTo: home))")
-            if excludedRoots.contains(where: { excluded in
-                url.standardizedFileURL == excluded || url.standardizedFileURL.path.hasPrefix(excluded.path + "/")
-            }) {
+            checkedCount += 1
+            if checkedCount == 1 || checkedCount.isMultiple(of: 128) {
+                await progress?("Checking \(displayPath(url, relativeTo: home))")
+            }
+            let standardizedPath = url.standardizedFileURL.path
+            if excludedPaths.contains(standardizedPath)
+                || excludedPaths.contains(where: { standardizedPath.hasPrefix($0 + "/") }) {
                 if isDirectory(url) { enumerator.skipDescendants() }
                 continue
             }
@@ -634,8 +847,13 @@ actor CleanupEngine {
                   values.isSymbolicLink != true,
                   values.isRegularFile == true,
                   isOwnedByCurrentUser(url),
-                  (values.contentModificationDate ?? .distantFuture) <= cutoff else { continue }
-            result.append(url)
+                  let modificationDate = values.contentModificationDate,
+                  modificationDate <= cutoff else { continue }
+            result.append(AgedFileEvidence(
+                url: url,
+                size: Int64(values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0),
+                ageDays: ageDays(from: modificationDate, now: now)
+            ))
         }
         return result
     }
@@ -705,7 +923,23 @@ actor CleanupEngine {
     private func candidateOrder(_ lhs: CleanupCandidate, _ rhs: CleanupCandidate) -> Bool {
         if lhs.isSelectable != rhs.isSelectable { return lhs.isSelectable }
         if lhs.defaultSelected != rhs.defaultSelected { return lhs.defaultSelected }
+        if badgeRank(lhs.badge) != badgeRank(rhs.badge) { return badgeRank(lhs.badge) < badgeRank(rhs.badge) }
         return lhs.size > rhs.size
+    }
+
+    private func badgeRank(_ badge: CandidateBadge) -> Int {
+        switch badge {
+        case .safe: 0
+        case .confirm: 1
+        case .review: 2
+        }
+    }
+
+    private func highAdditionalCleanupThreshold(freeSpace: Int64?) -> Int64 {
+        guard let freeSpace else { return 1_000_000_000 }
+        if freeSpace < 10_000_000_000 { return 100_000_000 }
+        if freeSpace < 30_000_000_000 { return 500_000_000 }
+        return 1_000_000_000
     }
 
     private func isImmediateCleanup(_ operation: CleanupOperation) -> Bool {
@@ -731,9 +965,46 @@ actor CleanupEngine {
         }
     }
 
+    private func canonicalBundleID(_ value: String) -> String {
+        value.lowercased()
+    }
+
+    private func isProtectedBundleID(_ value: String) -> Bool {
+        let normalized = value.lowercased()
+        return normalized.hasPrefix("com.apple.") || normalized.hasPrefix("org.webkit.")
+    }
+
+    private func displayName(for bundleID: String) -> String {
+        let lastPart = bundleID.split(separator: ".").last.map(String.init) ?? bundleID
+        let separators = CharacterSet(charactersIn: "-_")
+        let words = lastPart.components(separatedBy: separators).filter { !$0.isEmpty }
+        let compact = words.isEmpty ? lastPart : words.joined(separator: " ")
+        var result = ""
+        var previous: Character?
+        for character in compact {
+            if let previous,
+               character.isUppercase,
+               previous.isLowercase {
+                result.append(" ")
+            }
+            result.append(character)
+            previous = character
+        }
+        let readable = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !readable.isEmpty else { return bundleID }
+        return "\(readable.prefix(1).uppercased())\(readable.dropFirst()) (\(bundleID))"
+    }
+
     private func ageDays(of url: URL, now: Date) -> Int {
-        let date = modificationDate(of: url)
-        return max(0, Calendar.current.dateComponents([.day], from: date, to: now).day ?? 0)
+        ageDays(from: modificationDate(of: url), now: now)
+    }
+
+    private func ageDays(from date: Date, now: Date) -> Int {
+        max(0, Calendar.current.dateComponents([.day], from: date, to: now).day ?? 0)
+    }
+
+    private func oldestAgeDays(of urls: [URL], now: Date) -> Int? {
+        urls.map { ageDays(of: $0, now: now) }.max()
     }
 
     private func modificationDate(of url: URL) -> Date {
@@ -743,6 +1014,20 @@ actor CleanupEngine {
     private func allocatedSize(of url: URL) -> Int64 {
         guard let values = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey]) else { return 0 }
         return Int64(values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0)
+    }
+
+    private func totalCapacity(at url: URL) -> Int64? {
+        guard let capacity = try? url.resourceValues(forKeys: [.volumeTotalCapacityKey]).volumeTotalCapacity else { return nil }
+        return Int64(capacity)
+    }
+
+    private func availableCapacity(at url: URL) -> Int64? {
+        guard let capacity = try? url.resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+        ).volumeAvailableCapacityForImportantUsage else {
+            return nil
+        }
+        return capacity
     }
 
     private func exists(_ url: URL) -> Bool {
@@ -801,6 +1086,54 @@ actor CleanupEngine {
             }
         }
         return total
+    }
+
+    private func measureOwnedPortionOfTree(_ url: URL, now: Date) -> OwnedTreeMeasurement? {
+        guard isOwnedByCurrentUser(url), !isSymbolicLink(url) else { return nil }
+        if !isDirectory(url) {
+            return OwnedTreeMeasurement(
+                files: [AgedFileEvidence(url: url, size: allocatedSize(of: url), ageDays: ageDays(of: url, now: now))],
+                hasSkippedFiles: false
+            )
+        }
+
+        let keys: Set<URLResourceKey> = [
+            .isDirectoryKey,
+            .isRegularFileKey,
+            .isSymbolicLinkKey,
+            .contentModificationDateKey,
+            .totalFileAllocatedSizeKey,
+            .fileAllocatedSizeKey,
+        ]
+        guard let enumerator = fileManager.enumerator(
+            at: url,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsPackageDescendants]
+        ) else { return nil }
+
+        var files: [AgedFileEvidence] = []
+        var hasSkippedFiles = false
+        for case let item as URL in enumerator {
+            guard let values = try? item.resourceValues(forKeys: keys) else { continue }
+            if values.isSymbolicLink == true {
+                hasSkippedFiles = true
+                if values.isDirectory == true { enumerator.skipDescendants() }
+                continue
+            }
+            guard isOwnedByCurrentUser(item) else {
+                hasSkippedFiles = true
+                if values.isDirectory == true { enumerator.skipDescendants() }
+                continue
+            }
+            guard values.isRegularFile == true else { continue }
+            let modificationDate = values.contentModificationDate ?? modificationDate(of: item)
+            files.append(AgedFileEvidence(
+                url: item,
+                size: Int64(values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0),
+                ageDays: ageDays(from: modificationDate, now: now)
+            ))
+        }
+        return OwnedTreeMeasurement(files: files, hasSkippedFiles: hasSkippedFiles)
     }
 
     private func isSafe(_ url: URL, inside root: URL) -> Bool {

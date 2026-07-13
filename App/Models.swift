@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 enum CleanupMode: String, CaseIterable, Identifiable, Sendable {
     case low = "LOW"
@@ -31,9 +32,9 @@ enum CleanupMode: String, CaseIterable, Identifiable, Sendable {
         case .low:
             "Old caches and logs using a 30-day rule."
         case .mid:
-            "Baseline cleanup plus known app caches using a 14-day rule."
+            "Baseline cleanup plus expanded closed-app caches using a 14-day rule."
         case .high:
-            "Adds reviewed developer, package, and closed-app render caches."
+            "Adds reviewed developer, package, sandbox, and closed-app render caches plus storage insights."
         case .leftovers:
             "Inactive application data, reviewed one item at a time and moved to Trash."
         }
@@ -69,6 +70,23 @@ struct DeleteTreePlan: Sendable {
     let analyzedSize: Int64
     let analyzedModificationDate: Date
     let ownerBundleIDs: Set<String>
+    let fileCount: Int?
+
+    init(
+        url: URL,
+        scopeRoot: URL,
+        analyzedSize: Int64,
+        analyzedModificationDate: Date,
+        ownerBundleIDs: Set<String>,
+        fileCount: Int? = nil
+    ) {
+        self.url = url
+        self.scopeRoot = scopeRoot
+        self.analyzedSize = analyzedSize
+        self.analyzedModificationDate = analyzedModificationDate
+        self.ownerBundleIDs = ownerBundleIDs
+        self.fileCount = fileCount
+    }
 }
 
 enum CleanupOperation: Sendable {
@@ -90,6 +108,20 @@ struct ReclaimEvidence: Sendable {
     }
 }
 
+struct RegrowthPrediction: Sendable {
+    let predictedRetentionRate: Double
+    let confidence: Double
+    let historicalCleanups: Int
+    let averageRetainedPercent: Double
+    let trend: Trend
+
+    enum Trend: String, Sendable {
+        case improving
+        case stable
+        case degrading
+    }
+}
+
 struct CleanupCandidate: Identifiable, Sendable {
     let id: String
     let label: String
@@ -101,6 +133,13 @@ struct CleanupCandidate: Identifiable, Sendable {
     let operation: CleanupOperation
     var currentFootprint: Int64 = 0
     var reclaimEvidence: ReclaimEvidence?
+    var compositeScore: Double?
+    var scorePercentile: Int?
+    var efficiencyRatio: Double?
+    var regrowthPrediction: RegrowthPrediction?
+    var daysSinceLastAccess: Int?
+    var hasPartialOwnership = false
+    var bundleID: String?
 
     var isSelectable: Bool {
         if case .recommendation = operation { return false }
@@ -108,10 +147,63 @@ struct CleanupCandidate: Identifiable, Sendable {
     }
 }
 
+struct ScoreFactors: Sendable {
+    let sizeNorm: Double
+    let ageNorm: Double
+    let recoverability: Double
+    let regrowthResistance: Double
+    let safetyConfidence: Double
+}
+
+struct ScoredCandidate: Sendable {
+    let candidate: CleanupCandidate
+    let score: Double
+    let efficiency: Double
+    let factors: ScoreFactors
+}
+
+struct ParetoEfficiency: Sendable {
+    let selectedBytes: Int64
+    let totalReclaimableBytes: Int64
+    let selectedCount: Int
+    let totalCount: Int
+
+    var spaceEfficiency: Double {
+        Double(selectedBytes) / Double(max(Int64(1), totalReclaimableBytes))
+    }
+
+    var countEfficiency: Double {
+        Double(selectedCount) / Double(max(1, totalCount))
+    }
+
+    var efficiencyRatio: Double {
+        spaceEfficiency / max(0.01, countEfficiency)
+    }
+}
+
 struct AnalysisReport: Sendable {
     let mode: CleanupMode
     let candidates: [CleanupCandidate]
     let warnings: [String]
+    let analyzedAt: Date
+    let volumeCapacity: Int64?
+    let volumeFreeSpace: Int64?
+
+    init(
+        mode: CleanupMode,
+        candidates: [CleanupCandidate],
+        warnings: [String],
+        analyzedAt: Date = Date(),
+        volumeCapacity: Int64? = nil,
+        volumeFreeSpace: Int64? = nil
+    ) {
+        self.mode = mode
+        self.candidates = candidates
+        self.warnings = warnings
+        self.analyzedAt = analyzedAt
+        self.volumeCapacity = volumeCapacity
+        self.volumeFreeSpace = volumeFreeSpace
+    }
 
     var reclaimableBytes: Int64 {
         candidates
@@ -180,6 +272,7 @@ enum AppPhase: Equatable {
     case reviewReady
     case cleaning
     case cleanupComplete
+    case waitingForAppsToClose([NSRunningApplication])
     case failed(String)
 }
 

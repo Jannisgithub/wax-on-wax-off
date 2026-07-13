@@ -43,8 +43,29 @@ final class CleanupExpansionTests: XCTestCase {
         XCTAssertNotNil(targets["pnpm-cache"])
         XCTAssertNotNil(targets["cocoapods-cache"])
         XCTAssertNotNil(targets["cargo-download-cache"])
+        XCTAssertNotNil(targets["cargo-git-checkouts"])
         XCTAssertNotNil(targets["go-build-cache"])
+        XCTAssertNotNil(targets["firefox-disk-cache"])
+        XCTAssertNotNil(targets["xcode-documentation-cache"])
+        XCTAssertNil(targets["xcode-archives"])
+        XCTAssertNotNil(targets["xcode-caches"])
+        XCTAssertNil(targets["conda-packages"])
+        XCTAssertNil(targets["anaconda-packages"])
+        XCTAssertNotNil(targets["bundler-cache"])
+        XCTAssertNotNil(targets["pub-cache"])
+        XCTAssertNil(targets["stack-cache"])
+        XCTAssertNotNil(targets["poetry-cache"])
+        XCTAssertNil(targets["pipenv-virtualenvs"])
+        XCTAssertNotNil(targets["pip-xdg-cache"])
+        XCTAssertNotNil(targets["terraform-plugins"])
+        XCTAssertNotNil(targets["kubernetes-cache"])
+        XCTAssertNotNil(targets["helm-cache"])
+        XCTAssertNotNil(targets["helm-xdg-cache"])
+        XCTAssertNotNil(targets["aws-cli-cache"])
+        XCTAssertNotNil(targets["gcloud-logs"])
+        XCTAssertNotNil(targets["homebrew-logs"])
         XCTAssertTrue(CleanupPolicy.developerCaches.allSatisfy { !$0.defaultSelected })
+        XCTAssertTrue(CleanupPolicy.extendedAppCaches.allSatisfy { !$0.defaultSelected })
         XCTAssertEqual(targets["go-module-downloads"]?.defaultSelected, false)
         XCTAssertEqual(targets["gradle-distributions"]?.defaultSelected, false)
         XCTAssertEqual(CleanupMode.high.ageDays, CleanupMode.mid.ageDays)
@@ -56,6 +77,90 @@ final class CleanupExpansionTests: XCTestCase {
 
         let report = await CleanupEngine().analyze(mode: .high, home: home, runningBundleIDs: [])
         XCTAssertTrue(report.warnings.contains { $0.contains("MID is recommended") })
+    }
+
+    func testMidIncludesExpandedClosedAppCachesWithoutDeveloperTargets() {
+        let ids = Set(CleanupPolicy.targets(for: .mid).map(\.id))
+
+        XCTAssertTrue(ids.contains("firefox-disk-cache"))
+        XCTAssertTrue(ids.contains("slack-disk-cache"))
+        XCTAssertFalse(ids.contains("xcode-derived"))
+    }
+
+    func testTolerantTreeValidationAllowsShrinkAndRejectsGrowth() async throws {
+        let shrinkHome = try temporaryHome()
+        let growthHome = try temporaryHome()
+        defer {
+            try? FileManager.default.removeItem(at: shrinkHome)
+            try? FileManager.default.removeItem(at: growthHome)
+        }
+
+        let shrinkTarget = shrinkHome.appendingPathComponent("Library/Developer/Xcode/DerivedData/Shrink", isDirectory: true)
+        try FileManager.default.createDirectory(at: shrinkTarget, withIntermediateDirectories: true)
+        let removedBeforeApply = shrinkTarget.appendingPathComponent("old-index")
+        try Data(repeating: 1, count: 64_000).write(to: removedBeforeApply)
+        try Data(repeating: 2, count: 64_000).write(to: shrinkTarget.appendingPathComponent("remaining-index"))
+
+        let shrinkEngine = CleanupEngine()
+        let shrinkReport = await shrinkEngine.analyze(mode: .high, home: shrinkHome, runningBundleIDs: [])
+        let shrinkCandidate = try XCTUnwrap(shrinkReport.candidates.first { $0.id == "xcode-derived" })
+        try FileManager.default.removeItem(at: removedBeforeApply)
+
+        let shrinkResult = await shrinkEngine.apply(candidates: [shrinkCandidate], home: shrinkHome)
+
+        XCTAssertEqual(shrinkResult.removedItems, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: shrinkTarget.path))
+
+        let growthTarget = growthHome.appendingPathComponent("Library/Developer/Xcode/DerivedData/Growth", isDirectory: true)
+        try FileManager.default.createDirectory(at: growthTarget, withIntermediateDirectories: true)
+        try Data(repeating: 3, count: 64_000).write(to: growthTarget.appendingPathComponent("index"))
+
+        let growthEngine = CleanupEngine()
+        let growthReport = await growthEngine.analyze(mode: .high, home: growthHome, runningBundleIDs: [])
+        let growthCandidate = try XCTUnwrap(growthReport.candidates.first { $0.id == "xcode-derived" })
+        try Data(repeating: 4, count: 2_000_000).write(to: growthTarget.appendingPathComponent("new-active-file"))
+
+        let growthResult = await growthEngine.apply(candidates: [growthCandidate], home: growthHome)
+
+        XCTAssertEqual(growthResult.skippedItems, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: growthTarget.path))
+    }
+
+    func testPartialOwnershipStyleTreesDeleteOnlyOwnedFiles() async throws {
+        let home = try temporaryHome()
+        let outside = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WaxOnWaxOffPartialOutside-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: home)
+            try? FileManager.default.removeItem(at: outside)
+        }
+
+        let target = home.appendingPathComponent("Library/Developer/Xcode/DerivedData/Partial", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let ownedFile = target.appendingPathComponent("owned-index")
+        try Data(repeating: 5, count: 64_000).write(to: ownedFile)
+        try FileManager.default.createSymbolicLink(
+            at: target.appendingPathComponent("external-link"),
+            withDestinationURL: outside
+        )
+
+        let engine = CleanupEngine()
+        let report = await engine.analyze(mode: .high, home: home, runningBundleIDs: [])
+        let candidate = try XCTUnwrap(report.candidates.first { $0.id == "xcode-derived" })
+
+        XCTAssertEqual(candidate.badge, .review)
+        XCTAssertFalse(candidate.defaultSelected)
+        XCTAssertTrue(candidate.hasPartialOwnership)
+        guard case let .deleteFiles(plan) = candidate.operation else {
+            return XCTFail("Partial trees should remove only owned files")
+        }
+        XCTAssertEqual(plan.urls.map(\.lastPathComponent), ["owned-index"])
+
+        _ = await engine.apply(candidates: [candidate], home: home)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ownedFile.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: target.path))
     }
 
     func testNamedHighCacheIsExcludedFromBroadUserCacheCandidate() async throws {
@@ -180,10 +285,62 @@ final class CleanupExpansionTests: XCTestCase {
         let engine = CleanupEngine()
         let report = await engine.analyze(mode: .high, home: home, runningBundleIDs: [])
         let candidate = try XCTUnwrap(report.candidates.first { $0.id == "maven-remote-cache" })
+        XCTAssertEqual(candidate.currentFootprint, candidate.size)
         _ = await engine.apply(candidates: [candidate], home: home)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: remote.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: local.path))
+    }
+
+    func testHighFindsOldSandboxContainerCachesAndKeepsPersistentData() async throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let dataRoot = home.appendingPathComponent("Library/Containers/com.example.Sandboxed/Data", isDirectory: true)
+        let cache = dataRoot.appendingPathComponent("Library/Caches/http.cache")
+        let temp = dataRoot.appendingPathComponent("tmp/render.tmp")
+        let logs = dataRoot.appendingPathComponent("Library/Logs/debug.log")
+        let support = dataRoot.appendingPathComponent("Library/Application Support/state.db")
+        for file in [cache, temp, logs, support] {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(repeating: 1, count: 4_096).write(to: file)
+            try setAge(days: 20, for: file)
+        }
+
+        let engine = CleanupEngine()
+        let report = await engine.analyze(mode: .high, home: home, runningBundleIDs: [])
+        let candidate = try XCTUnwrap(report.candidates.first { $0.label.contains("com.example.sandboxed") })
+
+        XCTAssertEqual(candidate.itemCount, 3)
+        XCTAssertFalse(candidate.defaultSelected)
+
+        let result = await engine.apply(candidates: [candidate], home: home)
+
+        XCTAssertEqual(result.removedItems, 3)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cache.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: temp.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: logs.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: support.path))
+    }
+
+    func testHighSkipsSandboxContainerForRunningApp() async throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let cache = home.appendingPathComponent("Library/Containers/com.example.Sandboxed/Data/Library/Caches/http.cache")
+        try FileManager.default.createDirectory(at: cache.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(repeating: 2, count: 4_096).write(to: cache)
+        try setAge(days: 20, for: cache)
+
+        let report = await CleanupEngine().analyze(
+            mode: .high,
+            home: home,
+            runningBundleIDs: ["com.example.Sandboxed.helper"]
+        )
+
+        XCTAssertFalse(report.candidates.contains { $0.label.contains("com.example.sandboxed") })
+        XCTAssertTrue(report.warnings.contains { $0.contains("sandbox caches for com.example.sandboxed") })
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cache.path))
     }
 
     @MainActor
@@ -356,6 +513,118 @@ final class CleanupExpansionTests: XCTestCase {
     }
 
     @MainActor
+    func testHighModeStartsWithSmartExtraCleanupSelected() {
+        let model = AppModel(
+            demoActivityDelay: 0,
+            userDefaults: isolatedDefaults(),
+            accessManager: RecordingFolderAccessManager()
+        )
+
+        model.openDemoMode()
+        model.selectDemoMode(.high)
+
+        let baselineIDs = Set(model.candidates.filter(\.defaultSelected).map(\.id))
+
+        XCTAssertTrue(model.selectedCandidateIDs.isSuperset(of: baselineIDs))
+        XCTAssertGreaterThan(model.selectedCandidateIDs.count, baselineIDs.count)
+        XCTAssertTrue(model.selectedCandidateIDs.contains("demo-high-render-cache"))
+    }
+
+    @MainActor
+    func testSelectAllAndNoneOnlyChangeSelectableCandidates() {
+        let model = AppModel(
+            demoActivityDelay: 0,
+            userDefaults: isolatedDefaults(),
+            accessManager: RecordingFolderAccessManager()
+        )
+        let selectable = CleanupCandidate(
+            id: "selectable",
+            label: "Selectable cache",
+            detail: "Test",
+            size: 400,
+            itemCount: 1,
+            badge: .safe,
+            defaultSelected: false,
+            operation: .deleteTree(DeleteTreePlan(
+                url: URL(fileURLWithPath: "/tmp/selectable"),
+                scopeRoot: URL(fileURLWithPath: "/tmp"),
+                analyzedSize: 400,
+                analyzedModificationDate: Date(),
+                ownerBundleIDs: []
+            ))
+        )
+        let recommendation = CleanupCandidate(
+            id: "recommendation",
+            label: "Manual action",
+            detail: "Test",
+            size: 800,
+            itemCount: 1,
+            badge: .review,
+            defaultSelected: false,
+            operation: .recommendation
+        )
+        model.candidates = [selectable, recommendation]
+        model.storageBalance = StorageBalance(
+            totalCapacity: 10_000,
+            physicalFree: 1_000,
+            availableForImportant: 2_000,
+            availableForOpportunistic: 2_500
+        )
+
+        model.selectAll()
+
+        XCTAssertEqual(model.selectedCandidateIDs, ["selectable"])
+        XCTAssertTrue(model.allSelectableSelected)
+        XCTAssertEqual(model.selectableCandidateCount, 1)
+        XCTAssertEqual(model.selectedSelectableCandidateCount, 1)
+        XCTAssertEqual(model.storageBalance?.reclaimableByApp, 400)
+
+        model.deselectAll()
+
+        XCTAssertTrue(model.selectedCandidateIDs.isEmpty)
+        XCTAssertFalse(model.allSelectableSelected)
+        XCTAssertEqual(model.selectedSelectableCandidateCount, 0)
+        XCTAssertEqual(model.storageBalance?.reclaimableByApp, 0)
+        XCTAssertEqual(model.phase, .analysisComplete)
+    }
+
+    @MainActor
+    func testExpandedCandidatePathsAreCappedAtFive() {
+        let model = AppModel(
+            demoActivityDelay: 0,
+            userDefaults: isolatedDefaults(),
+            accessManager: RecordingFolderAccessManager()
+        )
+        let paths = (0..<8).map { URL(fileURLWithPath: "/tmp/cache/file-\($0)") }
+        let candidate = CleanupCandidate(
+            id: "aged-cache",
+            label: "Aged cache files",
+            detail: "Test",
+            size: 800,
+            itemCount: paths.count,
+            badge: .safe,
+            defaultSelected: true,
+            operation: .deleteFiles(DeleteFilesPlan(
+                urls: paths,
+                cutoff: Date(),
+                scopeRoot: URL(fileURLWithPath: "/tmp/cache"),
+                measurementRoot: URL(fileURLWithPath: "/tmp/cache"),
+                ownerBundleIDs: []
+            ))
+        )
+        model.candidates = [candidate]
+
+        XCTAssertEqual(model.candidatePathCount(for: candidate), 8)
+        XCTAssertEqual(model.candidatePaths(for: candidate).count, 5)
+        XCTAssertEqual(model.candidatePaths(for: candidate).map(\.lastPathComponent), ["file-0", "file-1", "file-2", "file-3", "file-4"])
+
+        model.toggleCandidateExpansion(candidate.id)
+        XCTAssertTrue(model.expandedCandidateIDs.contains(candidate.id))
+        model.toggleCandidateExpansion(candidate.id)
+        XCTAssertFalse(model.expandedCandidateIDs.contains(candidate.id))
+    }
+
+    @MainActor
     func testLaunchChoiceIsShownOnlyUntilUserChoosesPath() {
         let defaults = isolatedDefaults()
         let firstLaunch = AppModel(
@@ -494,13 +763,19 @@ final class CleanupExpansionTests: XCTestCase {
             makeEvidenceDirectory("Library/Saved Application State/\(bundleID).savedState", home: home),
             makeEvidenceDirectory("Library/Containers/\(bundleID)", home: home),
             makeEvidenceDirectory("Library/Application Support/\(bundleID)", home: home),
+            makeEvidenceDirectory("Library/HTTPStorages/\(bundleID)", home: home),
+            makeEvidenceDirectory("Library/WebKit/\(bundleID)", home: home),
+            makeEvidenceDirectory("Library/Logs/\(bundleID)", home: home),
+            makeEvidenceDirectory("Library/Application Scripts/\(bundleID)", home: home),
+            makeEvidenceFile("Library/SyncedPreferences/\(bundleID).plist", home: home),
             makeEvidenceDirectory("Library/Group Containers/group.\(bundleID)", home: home),
         ]
 
         let report = await CleanupEngine().analyze(mode: .leftovers, home: home, runningBundleIDs: [])
-        let candidate = try XCTUnwrap(report.candidates.first { $0.label == bundleID })
+        let candidate = try XCTUnwrap(report.candidates.first { $0.bundleID == bundleID })
 
         XCTAssertFalse(candidate.defaultSelected)
+        XCTAssertEqual(candidate.label, "Oldapp (\(bundleID))")
         XCTAssertEqual(candidate.itemCount, evidenceURLs.count)
         XCTAssertGreaterThanOrEqual(candidate.size, 1_000_000)
         XCTAssertTrue(candidate.detail.contains("Missing installed app for \(bundleID)"))
@@ -528,6 +803,7 @@ final class CleanupExpansionTests: XCTestCase {
         try makeInstalledApp(bundleID: "com.example.installed", home: home)
         try makeEvidenceDirectory("Library/Caches/com.example.running", home: home)
         try makeEvidenceDirectory("Library/Caches/com.apple.oldapp", home: home)
+        try makeEvidenceDirectory("Library/Caches/org.webkit.oldapp", home: home)
         try makeEvidenceDirectory("Library/Caches/com.example.young", home: home, ageDays: 5)
         try makeEvidenceDirectory("Library/Caches/com.example.small", home: home, bytes: 512)
         try makeEvidenceDirectory("Library/Application Support/Old Example App", home: home)
@@ -550,6 +826,55 @@ final class CleanupExpansionTests: XCTestCase {
         )
 
         XCTAssertTrue(report.candidates.isEmpty)
+    }
+
+    func testApplicationLeftoversDisplayNameKeepsCamelCaseReadable() async throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let bundleID = "com.example.MyGreatApp"
+        try makeEvidenceDirectory("Library/HTTPStorages/\(bundleID)", home: home, bytes: 1_100_000)
+
+        let report = await CleanupEngine().analyze(mode: .leftovers, home: home, runningBundleIDs: [])
+        let candidate = try XCTUnwrap(report.candidates.first { $0.bundleID == bundleID })
+
+        XCTAssertEqual(candidate.label, "My Great App (\(bundleID))")
+    }
+
+    func testSystemDataAdvisorDetectsLargeManualAreas() throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let backup = home.appendingPathComponent("Library/Application Support/MobileSync/Backup/Device", isDirectory: true)
+        let docker = home.appendingPathComponent("Library/Containers/com.docker.docker/Data/vms/0", isDirectory: true)
+        let pipenv = home.appendingPathComponent(".local/share/virtualenvs/old-project", isDirectory: true)
+        let conda = home.appendingPathComponent("miniconda3/pkgs/example", isDirectory: true)
+        let stack = home.appendingPathComponent(".stack/programs/example", isDirectory: true)
+        try FileManager.default.createDirectory(at: backup, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: docker, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: pipenv, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: conda, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: stack, withIntermediateDirectories: true)
+        try Data(repeating: 1, count: 128_000).write(to: backup.appendingPathComponent("backup.bin"))
+        try Data(repeating: 2, count: 128_000).write(to: docker.appendingPathComponent("docker.bin"))
+        try Data(repeating: 3, count: 128_000).write(to: pipenv.appendingPathComponent("python"))
+        try Data(repeating: 4, count: 128_000).write(to: conda.appendingPathComponent("package.bin"))
+        try Data(repeating: 5, count: 128_000).write(to: stack.appendingPathComponent("ghc"))
+
+        let advisories = SystemDataAdvisor.scan(
+            home: home,
+            thresholds: .init(
+                iOSBackups: 1,
+                dockerData: 1,
+                purgeableSpace: .max,
+                toolManagedData: 1
+            )
+        )
+
+        XCTAssertTrue(advisories.contains { $0.id == "ios-backups" && $0.actionType == .manualAction })
+        XCTAssertTrue(advisories.contains { $0.id == "docker-data" && $0.actionType == .manualAction })
+        XCTAssertTrue(advisories.contains { $0.id == "pipenv-environments" && $0.actionType == .manualAction })
+        XCTAssertTrue(advisories.contains { $0.id == "miniconda-packages" && $0.actionType == .manualAction })
+        XCTAssertTrue(advisories.contains { $0.id == "stack-root" && $0.actionType == .manualAction })
     }
 
     private func temporaryHome() throws -> URL {

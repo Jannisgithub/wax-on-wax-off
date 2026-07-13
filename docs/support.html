@@ -28,7 +28,7 @@
       <h3>What is Demo Mode?</h3>
       <p>Demo Mode is a separate selectable sample workflow. It uses built-in sample data so you can choose and preview LOW, MID, HIGH, and APPLICATION LEFTOVERS workflows. Demo Mode does not scan, move, or delete real files, and Skip demo is always available during the demo.</p>
       <h3>What is LOW / MID / HIGH?</h3>
-      <p>LOW reviews old caches and logs using a 30-day rule. MID adds known app caches using a 14-day rule. HIGH adds reviewed developer, package, and closed-app render caches; HIGH-only items start unchecked.</p>
+      <p>LOW reviews old caches and logs using a 30-day rule. MID adds expanded closed-app browser, media, and communication caches using a 14-day rule. HIGH adds reviewed developer caches, package caches, third-party sandbox cache/log/temp files, and closed-app render caches; uncertain tool data stays out of smart selection, and HIGH cleanup requires typed confirmation.</p>
       <h3>What are APPLICATION LEFTOVERS?</h3>
       <p>APPLICATION LEFTOVERS are possible inactive app data items grouped by bundle identifier with Home-relative evidence paths. They are never selected automatically, and selected items are moved to Trash.</p>
       <h3>How do I use real cleanup?</h3>
@@ -36,7 +36,7 @@
       <h3>Why does the app ask for my Home folder?</h3>
       <p>The Mac App Store build runs in the macOS App Sandbox. It can only inspect cleanup candidates after you choose your own Home folder in the standard macOS folder picker. Do not enable Full Disk Access; the app does not need it. The app rejects system folders, <code>/Users</code>, other user folders, and lookalike folders.</p>
       <h3>Does the app scan Documents, Desktop, or Downloads?</h3>
-      <p>No. Protected personal folders such as Documents, Desktop, Downloads, Pictures, Movies, and Music are not scanned. Cleanup is limited to approved local cleanup locations such as old caches, logs, crash reports, and reviewed package or developer caches.</p>
+      <p>No. Protected personal folders such as Documents, Desktop, Downloads, Pictures, Movies, and Music are not scanned. Cleanup is limited to approved local cleanup locations such as old caches, logs, crash reports, temporary cache folders, and reviewed package or developer caches.</p>
       <h3>How do I contact support?</h3>
       <p>Email <a href="mailto:jannisaivatzidis@gmail.com?subject=Wax%20On%2FWax%20Off%20Support">jannisaivatzidis@gmail.com</a> with your app version, macOS version, cleanup mode, and a short description of the issue.</p>
     </section>

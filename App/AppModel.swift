@@ -3,6 +3,71 @@ import Darwin
 import Foundation
 import OSLog
 
+protocol RunningApplicationTerminating: AnyObject {
+    var isTerminated: Bool { get }
+    var processIdentifier: pid_t { get }
+
+    @discardableResult
+    func terminate() -> Bool
+
+    @discardableResult
+    func forceTerminate() -> Bool
+}
+
+extension NSRunningApplication: RunningApplicationTerminating {}
+
+enum ApplicationTerminationRequester {
+    static func requestGracefulClose(_ applications: [any RunningApplicationTerminating]) {
+        for application in applications where !application.isTerminated {
+            if !application.terminate() {
+                _ = application.forceTerminate()
+            }
+        }
+    }
+
+    static func forceClose(_ applications: [any RunningApplicationTerminating]) {
+        for application in applications where !application.isTerminated {
+            _ = application.forceTerminate()
+        }
+    }
+}
+
+struct ApplicationTerminationTracker {
+    private(set) var pendingProcessIDs: Set<pid_t>
+
+    var isComplete: Bool {
+        pendingProcessIDs.isEmpty
+    }
+
+    @discardableResult
+    mutating func markTerminated(_ processIdentifier: pid_t) -> Bool {
+        pendingProcessIDs.remove(processIdentifier) != nil
+    }
+
+    @discardableResult
+    mutating func track(_ processIdentifier: pid_t) -> Bool {
+        pendingProcessIDs.insert(processIdentifier).inserted
+    }
+}
+
+enum ASCIISparkline {
+    private static let levels = Array("▁▂▃▄▅▆▇█")
+
+    static func render(_ values: [Int64]) -> String {
+        guard !values.isEmpty else { return "" }
+        let normalizedValues = values.map { max(0, $0) }
+        guard let maximum = normalizedValues.max(), maximum > 0 else {
+            return String(repeating: String(levels[0]), count: values.count)
+        }
+
+        return String(normalizedValues.map { value in
+            let ratio = Double(value) / Double(maximum)
+            let index = min(levels.count - 1, Int(ratio * Double(levels.count - 1)))
+            return levels[index]
+        })
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     nonisolated static let highConfirmationPhrase = "DELETE"
@@ -18,6 +83,12 @@ final class AppModel: ObservableObject {
     @Published var demoStep: DemoStep = .intro
     @Published var guidanceMessage = "Choose the path: true focus (Full Version) or practice first (Demo)."
     @Published var activityItem = ""
+    @Published var storageBalance: StorageBalance?
+    @Published var systemAdvisories: [SystemDataAdvisor.Advisory] = []
+    @Published var scoredCandidates: [ScoredCandidate] = []
+    @Published var paretoEfficiency: ParetoEfficiency?
+    @Published var expandedCandidateIDs: Set<String> = []
+    @Published private(set) var cleanupHistory: [Int64] = []
 
     private let accessManager: FolderAccessManaging
     private let engine = CleanupEngine()
@@ -29,6 +100,16 @@ final class AppModel: ObservableObject {
     private let currentUserID = getuid()
     private var authorizedHome: URL?
     private var analysisGeneration = 0
+    private var appTerminationObserver: NSObjectProtocol?
+    private var appTerminationCompletionTask: Task<Void, Never>?
+    private var appTerminationForceTask: Task<Void, Never>?
+    private var appTerminationPollTask: Task<Void, Never>?
+    private var appTerminationTimeoutTask: Task<Void, Never>?
+    private var appTerminationTracker = ApplicationTerminationTracker(pendingProcessIDs: [])
+    private var pendingTerminationApplications: [pid_t: any RunningApplicationTerminating] = [:]
+    private var pendingTerminationAppNames: [pid_t: String] = [:]
+    private var pendingTerminationBundleIDs: Set<String> = []
+    private var forceTerminationRequested = false
 
     init(
         demoActivityDelay: TimeInterval = 0.8,
@@ -38,6 +119,7 @@ final class AppModel: ObservableObject {
         self.demoActivityDelay = demoActivityDelay
         self.userDefaults = userDefaults
         self.accessManager = accessManager
+        cleanupHistory = historyStore.recentCleanupTotals(limit: 7)
         if userDefaults.bool(forKey: Self.launchChoiceSeenKey) || accessManager.authorizedHome() != nil {
             markLaunchChoiceSeen()
             restoreNormalLaunchState()
@@ -70,6 +152,8 @@ final class AppModel: ObservableObject {
             "REMOVING…"
         case .cleanupComplete:
             isDemoMode ? "PRACTICE AGAIN" : "SEEK CLUTTER AGAIN"
+        case .waitingForAppsToClose:
+            "CLOSE APPS TO CONTINUE"
         }
     }
 
@@ -77,6 +161,23 @@ final class AppModel: ObservableObject {
         candidates
             .filter { selectedCandidateIDs.contains($0.id) }
             .reduce(0) { $0 + $1.size }
+    }
+
+    var hasSelectableCandidates: Bool {
+        selectableCandidateCount > 0
+    }
+
+    var selectableCandidateCount: Int {
+        candidates.lazy.filter(\.isSelectable).count
+    }
+
+    var selectedSelectableCandidateCount: Int {
+        candidates.lazy.filter { $0.isSelectable && self.selectedCandidateIDs.contains($0.id) }.count
+    }
+
+    var allSelectableSelected: Bool {
+        let selectableIDs = Set(candidates.filter(\.isSelectable).map(\.id))
+        return !selectableIDs.isEmpty && selectableIDs.isSubset(of: selectedCandidateIDs)
     }
 
     var canRun: Bool {
@@ -89,7 +190,7 @@ final class AppModel: ObservableObject {
             false
         case .analysisComplete, .reviewReady:
             !selectedCandidateIDs.isEmpty
-        case .selectingFolder, .analyzing, .cleaning:
+        case .selectingFolder, .analyzing, .cleaning, .waitingForAppsToClose:
             false
         }
     }
@@ -143,6 +244,7 @@ final class AppModel: ObservableObject {
         analysisGeneration += 1
         accessManager.resetAuthorization()
         historyStore.reset()
+        cleanupHistory = []
         userDefaults.removeObject(forKey: Self.launchChoiceSeenKey)
         authorizedHome = nil
         selectedMode = .mid
@@ -158,10 +260,7 @@ final class AppModel: ObservableObject {
         analysisGeneration += 1
         guard !isDemoMode, phase != .launchChoice else { return }
         selectedMode = mode
-        candidates = []
-        selectedCandidateIDs = []
-        warnings = []
-        result = nil
+        clearScanState()
         if authorizedHome != nil || accessManager.authorizedHome() != nil {
             phase = .readyToAnalyze
             guidanceMessage = "Ready. Choose a cleanup mode and run analysis."
@@ -253,9 +352,10 @@ final class AppModel: ObservableObject {
 
     private func finishDemoModeSelection(_ mode: CleanupMode, generation: Int) {
         guard analysisGeneration == generation, isDemoMode, selectedMode == mode else { return }
-        candidates = demoCandidates(for: mode)
-        selectedCandidateIDs = Set(candidates.filter { $0.defaultSelected && $0.isSelectable }.map(\.id))
+        installScoredCandidates(demoCandidates(for: mode), mode: mode)
+        selectedCandidateIDs = defaultSelectionIDs(for: mode)
         warnings = demoWarnings(for: mode)
+        storageBalance = demoStorageBalance(for: mode)
         guidanceMessage = demoGuidance(for: demoStep)
         updateReviewPhase()
     }
@@ -267,6 +367,40 @@ final class AppModel: ObservableObject {
         } else {
             selectedCandidateIDs.insert(id)
         }
+        updateReviewPhase()
+    }
+
+    func selectAll() {
+        selectedCandidateIDs = Set(candidates.filter(\.isSelectable).map(\.id))
+        updateReviewPhase()
+    }
+
+    func deselectAll() {
+        selectedCandidateIDs = []
+        updateReviewPhase()
+    }
+
+    func toggleCandidateExpansion(_ id: String) {
+        guard let candidate = candidates.first(where: { $0.id == id }),
+              candidatePathCount(for: candidate) > 0 else { return }
+        if expandedCandidateIDs.contains(id) {
+            expandedCandidateIDs.remove(id)
+        } else {
+            expandedCandidateIDs.insert(id)
+        }
+    }
+
+    func candidatePaths(for candidate: CleanupCandidate, limit: Int = 5) -> [URL] {
+        Array(allCandidatePaths(for: candidate).prefix(max(0, limit)))
+    }
+
+    func candidatePathCount(for candidate: CleanupCandidate) -> Int {
+        allCandidatePaths(for: candidate).count
+    }
+
+    func applySmartSelection() {
+        guard selectedMode == .high, !scoredCandidates.isEmpty else { return }
+        selectedCandidateIDs = smartHighSelectionIDs()
         updateReviewPhase()
     }
 
@@ -314,13 +448,29 @@ final class AppModel: ObservableObject {
         startAnalysis()
     }
 
-    private func startAnalysis() {
+    private func startAnalysis(
+        skippingConflictingCheck: Bool = false,
+        additionalWarnings: [String] = []
+    ) {
         isDemoMode = false
         guard let home = authorizedHome ?? accessManager.authorizedHome() else {
             beginRealAnalysisFlow()
             return
         }
         authorizedHome = home
+
+        let mode = selectedMode
+        if !skippingConflictingCheck {
+            let conflicting = conflictingRunningApps(for: mode)
+            if !conflicting.isEmpty {
+                clearScanState()
+                phase = .waitingForAppsToClose(conflicting)
+                guidanceMessage = "Some apps are running that need to be closed to complete the scan."
+                activityItem = "WAITING / Please close conflicting apps"
+                return
+            }
+        }
+
         let scopedAccess = home.startAccessingSecurityScopedResource()
         guard scopedAccess else {
             accessManager.resetAuthorization()
@@ -336,45 +486,319 @@ final class AppModel: ObservableObject {
         clearScanState()
         analysisGeneration += 1
         let generation = analysisGeneration
-        let mode = selectedMode
         activityItem = "ANALYSIS / Preparing \(mode.compactTitle) analysis"
         let runningIDs = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
         let earliestReviewDate = Date().addingTimeInterval(minimumActivityDuration)
         logger.info("Scan started for \(mode.rawValue, privacy: .public)")
 
         Task {
-            let report = await engine.analyze(
+            let baseStorageBalance = StorageBalanceAnalyzer.analyze(volumeAt: home)
+            let advisoryTask = Task.detached(priority: .utility) {
+                mode == .high ? SystemDataAdvisor.scan(home: home) : []
+            }
+            let report = await self.engine.analyze(
                 mode: mode,
                 home: home,
                 runningBundleIDs: runningIDs,
-                progress: activityProgressHandler(prefix: "ANALYSIS")
+                progress: self.activityProgressHandler(prefix: "ANALYSIS")
             )
+            let advisories = await advisoryTask.value
             home.stopAccessingSecurityScopedResource()
-            await wait(until: earliestReviewDate)
-            guard analysisGeneration == generation, selectedMode == mode, !isDemoMode else { return }
-            let enriched = report.candidates.map(historyStore.enrich)
-            candidates = enriched
-            selectedCandidateIDs = Set(enriched.filter { $0.defaultSelected && $0.isSelectable }.map(\.id))
-            warnings = report.warnings
-            let itemCount = enriched.reduce(0) { $0 + max($1.itemCount, 1) }
-            let selectedSize = enriched
-                .filter { selectedCandidateIDs.contains($0.id) }
+            await self.wait(until: earliestReviewDate)
+            guard self.analysisGeneration == generation, self.selectedMode == mode, !self.isDemoMode else { return }
+            let enriched = report.candidates.map(self.historyStore.enrich)
+            self.installScoredCandidates(enriched, mode: mode)
+            self.selectedCandidateIDs = self.defaultSelectionIDs(for: mode)
+            self.warnings = report.warnings + additionalWarnings
+            self.storageBalance = baseStorageBalance
+            self.systemAdvisories = advisories
+            let itemCount = self.candidates.reduce(0) { $0 + max($1.itemCount, 1) }
+            let selectedSize = self.candidates
+                .filter { self.selectedCandidateIDs.contains($0.id) }
                 .reduce(Int64(0)) { $0 + $1.size }
-            logger.info("Scan completed for \(mode.rawValue, privacy: .public): categories=\(enriched.count, privacy: .public), items=\(itemCount, privacy: .public), selectedBytes=\(selectedSize, privacy: .public), warnings=\(report.warnings.count, privacy: .public)")
-            updateReviewPhase()
+            self.logger.info("Scan completed for \(mode.rawValue, privacy: .public): categories=\(self.candidates.count, privacy: .public), items=\(itemCount, privacy: .public), selectedBytes=\(selectedSize, privacy: .public), warnings=\(self.warnings.count, privacy: .public)")
+            self.updateReviewPhase()
         }
     }
 
+    func continueAnalysis(closingApps appsToClose: Set<NSRunningApplication>) {
+        cancelAppTerminationWait()
+        let activeApps = appsToClose.filter { !$0.isTerminated && $0.processIdentifier > 0 }
+        guard !activeApps.isEmpty else {
+            resumeAnalysisAfterAppWait()
+            return
+        }
+
+        appTerminationTracker = ApplicationTerminationTracker(
+            pendingProcessIDs: Set(activeApps.map(\.processIdentifier))
+        )
+        pendingTerminationApplications = Dictionary(uniqueKeysWithValues: activeApps.map {
+            ($0.processIdentifier, $0)
+        })
+        pendingTerminationAppNames = Dictionary(uniqueKeysWithValues: activeApps.map {
+            ($0.processIdentifier, $0.localizedName ?? "App \($0.processIdentifier)")
+        })
+        pendingTerminationBundleIDs = Set(activeApps.compactMap(\.bundleIdentifier).map {
+            $0.lowercased()
+        })
+        guidanceMessage = waitingForAppsMessage(count: activeApps.count)
+        activityItem = "WAITING / 0 of \(activeApps.count) selected apps closed"
+
+        let workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
+        appTerminationObserver = workspaceNotificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+                return
+            }
+            let processIdentifier = application.processIdentifier
+            Task { @MainActor [weak self] in
+                self?.recordApplicationTermination(processIdentifier)
+            }
+        }
+
+        appTerminationPollTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+                self?.refreshApplicationTerminationState()
+            }
+        }
+
+        appTerminationForceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.forceTerminatePendingApplications()
+        }
+
+        appTerminationTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            self?.handleApplicationTerminationFailure()
+        }
+
+        ApplicationTerminationRequester.requestGracefulClose(
+            activeApps.map { $0 as any RunningApplicationTerminating }
+        )
+        refreshApplicationTerminationState()
+    }
+
+    func continueAnalysisWithoutClosing() {
+        cancelAppTerminationWait()
+        startAnalysis(
+            skippingConflictingCheck: true,
+            additionalWarnings: ["Scan continued while conflicting apps were running. Active app caches are skipped for safety."]
+        )
+    }
+
+    private func recordApplicationTermination(_ processIdentifier: pid_t) {
+        guard appTerminationTracker.markTerminated(processIdentifier) else { return }
+        pendingTerminationApplications.removeValue(forKey: processIdentifier)
+        let remainingCount = appTerminationTracker.pendingProcessIDs.count
+
+        if appTerminationTracker.isComplete {
+            activityItem = "WAITING / Confirming selected apps stay closed"
+            appTerminationCompletionTask?.cancel()
+            appTerminationCompletionTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                self?.confirmApplicationTerminationCompletion()
+            }
+        } else {
+            activityItem = "WAITING / \(remainingCount) selected app process\(remainingCount == 1 ? "" : "es") still running"
+            guidanceMessage = waitingForAppsMessage(count: remainingCount)
+        }
+    }
+
+    private func confirmApplicationTerminationCompletion() {
+        let relaunchedApplications = NSWorkspace.shared.runningApplications.filter { application in
+            guard !application.isTerminated,
+                  application.processIdentifier > 0,
+                  let bundleIdentifier = application.bundleIdentifier?.lowercased() else {
+                return false
+            }
+            return pendingTerminationBundleIDs.contains(bundleIdentifier)
+        }
+
+        var newlyTrackedApplications: [any RunningApplicationTerminating] = []
+        for application in relaunchedApplications {
+            let processIdentifier = application.processIdentifier
+            guard appTerminationTracker.track(processIdentifier) else { continue }
+            pendingTerminationApplications[processIdentifier] = application
+            pendingTerminationAppNames[processIdentifier] = application.localizedName ?? "App \(processIdentifier)"
+            newlyTrackedApplications.append(application)
+        }
+
+        guard !newlyTrackedApplications.isEmpty else {
+            resumeAnalysisAfterAppWait()
+            return
+        }
+
+        let remainingCount = appTerminationTracker.pendingProcessIDs.count
+        guidanceMessage = remainingCount == 1
+            ? "The selected app relaunched. Terminating it again before analysis."
+            : "Selected apps relaunched. Terminating \(remainingCount) processes again before analysis."
+        activityItem = "CLOSING / Terminating relaunched selected apps"
+        if forceTerminationRequested {
+            ApplicationTerminationRequester.forceClose(newlyTrackedApplications)
+        } else {
+            ApplicationTerminationRequester.requestGracefulClose(newlyTrackedApplications)
+        }
+        refreshApplicationTerminationState()
+    }
+
+    private func refreshApplicationTerminationState() {
+        let processIdentifiers = appTerminationTracker.pendingProcessIDs
+        for processIdentifier in processIdentifiers {
+            let application = NSRunningApplication(processIdentifier: processIdentifier)
+            if application == nil || application?.isTerminated == true {
+                recordApplicationTermination(processIdentifier)
+            }
+        }
+    }
+
+    private func forceTerminatePendingApplications() {
+        forceTerminationRequested = true
+        let pendingProcessIDs = appTerminationTracker.pendingProcessIDs
+        guard !pendingProcessIDs.isEmpty else { return }
+
+        let remainingCount = pendingProcessIDs.count
+        guidanceMessage = remainingCount == 1
+            ? "The selected app did not close normally. Force-terminating it now."
+            : "\(remainingCount) selected apps did not close normally. Force-terminating them now."
+        activityItem = "CLOSING / Force-terminating \(remainingCount) selected app\(remainingCount == 1 ? "" : "s")"
+
+        let applications = pendingProcessIDs.compactMap { pendingTerminationApplications[$0] }
+        ApplicationTerminationRequester.forceClose(applications)
+        refreshApplicationTerminationState()
+    }
+
+    private func handleApplicationTerminationFailure() {
+        refreshApplicationTerminationState()
+        let remainingNames = Set(appTerminationTracker.pendingProcessIDs
+            .compactMap { pendingTerminationAppNames[$0] }
+        ).sorted()
+        guard !remainingNames.isEmpty else { return }
+
+        let appList = remainingNames.joined(separator: ", ")
+        let remainingApps = conflictingRunningApps(for: selectedMode)
+        cancelAppTerminationWait()
+        phase = .waitingForAppsToClose(remainingApps)
+        guidanceMessage = "macOS did not allow \(appList) to be terminated. Try Close Selected again or use Skip & Continue."
+        activityItem = "WAITING / Could not terminate \(appList)"
+    }
+
+    private func resumeAnalysisAfterAppWait() {
+        cancelAppTerminationWait()
+
+        var analysisWarnings: [String] = []
+        let stillRunning = conflictingRunningApps(for: selectedMode)
+            .compactMap(\.localizedName)
+            .sorted()
+        if !stillRunning.isEmpty {
+            analysisWarnings.append(
+                "Scan continued while \(stillRunning.joined(separator: ", ")) remained open. Active app caches are skipped for safety."
+            )
+        }
+
+        startAnalysis(
+            skippingConflictingCheck: true,
+            additionalWarnings: analysisWarnings
+        )
+    }
+
+    private func waitingForAppsMessage(count: Int) -> String {
+        count == 1
+            ? "Waiting for the selected app to close before analysis."
+            : "Waiting for \(count) selected apps to close before analysis."
+    }
+
+    private func cancelAppTerminationWait() {
+        if let appTerminationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(appTerminationObserver)
+            self.appTerminationObserver = nil
+        }
+        appTerminationTimeoutTask?.cancel()
+        appTerminationTimeoutTask = nil
+        appTerminationCompletionTask?.cancel()
+        appTerminationCompletionTask = nil
+        appTerminationForceTask?.cancel()
+        appTerminationForceTask = nil
+        appTerminationPollTask?.cancel()
+        appTerminationPollTask = nil
+        appTerminationTracker = ApplicationTerminationTracker(pendingProcessIDs: [])
+        pendingTerminationApplications = [:]
+        pendingTerminationAppNames = [:]
+        pendingTerminationBundleIDs = []
+        forceTerminationRequested = false
+    }
+
+    private func conflictingRunningApps(for mode: CleanupMode) -> [NSRunningApplication] {
+        guard mode != .leftovers else { return [] }
+        let runningApps = NSWorkspace.shared.runningApplications
+        var conflicting: [NSRunningApplication] = []
+        let targets = CleanupPolicy.targets(for: mode)
+        let appCaches = mode == .high ? CleanupPolicy.appSupportCaches : []
+
+        for app in runningApps {
+            guard let bundleID = app.bundleIdentifier?.lowercased() else { continue }
+
+            let isTargetOwned = targets.contains { target in
+                target.ownerBundleIDs.contains { owner in
+                    let normalizedOwner = owner.lowercased()
+                    return bundleID == normalizedOwner || bundleID.hasPrefix(normalizedOwner + ".")
+                }
+            }
+
+            let isCacheOwned = appCaches.contains { rule in
+                rule.ownerBundleIDs.contains { owner in
+                    let normalizedOwner = owner.lowercased()
+                    return bundleID == normalizedOwner || bundleID.hasPrefix(normalizedOwner + ".")
+                }
+            }
+
+            if isTargetOwned || isCacheOwned {
+                conflicting.append(app)
+            }
+        }
+        return conflicting
+    }
+
+    func performAdvisoryAction(_ advisory: SystemDataAdvisor.Advisory) {
+        switch advisory.destination {
+        case let .reveal(url):
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        case .storageSettings:
+            openStorageSettings()
+        case .none:
+            break
+        }
+    }
+
+    func openStorageSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.settings.Storage") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     private func clearScanState() {
+        cancelAppTerminationWait()
         result = nil
         candidates = []
+        scoredCandidates = []
         selectedCandidateIDs = []
+        expandedCandidateIDs = []
         warnings = []
+        storageBalance = nil
+        systemAdvisories = []
+        paretoEfficiency = nil
         activityItem = ""
     }
 
     private func updateReviewPhase() {
-        if candidates.isEmpty {
+        refreshSelectionMetrics()
+        if candidates.isEmpty && systemAdvisories.isEmpty {
             activityItem = ""
             phase = .emptyResults
             guidanceMessage = isDemoMode
@@ -392,6 +816,57 @@ final class AppModel: ObservableObject {
             guidanceMessage = isDemoMode
                 ? demoGuidance(for: demoStep)
                 : "Review selected items before removal. Files are not removed automatically."
+        }
+    }
+
+    private func installScoredCandidates(_ rawCandidates: [CleanupCandidate], mode: CleanupMode) {
+        scoredCandidates = CandidateScorer.score(rawCandidates, mode: mode)
+        candidates = scoredCandidates.map(\.candidate)
+    }
+
+    private func defaultSelectionIDs(for mode: CleanupMode) -> Set<String> {
+        if mode == .high {
+            return smartHighSelectionIDs()
+        }
+        return baselineSelectionIDs()
+    }
+
+    private func smartHighSelectionIDs() -> Set<String> {
+        var selected = baselineSelectionIDs()
+        selected.formUnion(CandidateScorer.paretoSelection(candidates: scoredCandidates))
+        return selected
+    }
+
+    private func baselineSelectionIDs() -> Set<String> {
+        Set(candidates.filter { $0.defaultSelected && $0.isSelectable }.map(\.id))
+    }
+
+    private func allCandidatePaths(for candidate: CleanupCandidate) -> [URL] {
+        switch candidate.operation {
+        case let .deleteFiles(plan):
+            plan.urls
+        case let .deleteTree(plan):
+            [plan.url]
+        case let .deleteTrees(plans, measurementRoot: _):
+            plans.map(\.url)
+        case let .recycle(urls):
+            urls
+        case .recommendation:
+            []
+        }
+    }
+
+    private func refreshSelectionMetrics() {
+        paretoEfficiency = CandidateScorer.paretoEfficiency(
+            candidates: candidates,
+            selectedIDs: selectedCandidateIDs
+        )
+        if let balance = storageBalance {
+            storageBalance = StorageBalanceAnalyzer.enrich(
+                balance,
+                selectedBytes: selectedBytes,
+                candidateCount: selectedCandidateIDs.count
+            )
         }
     }
 
@@ -422,7 +897,7 @@ final class AppModel: ObservableObject {
             let mismatch = NSAlert()
             mismatch.alertStyle = .warning
             mismatch.messageText = "Confirmation did not match"
-            mismatch.informativeText = "HIGH cleanup was not applied. Type \(Self.highConfirmationPhrase) exactly to confirm developer-cache removal."
+            mismatch.informativeText = "HIGH cleanup was not applied. Type \(Self.highConfirmationPhrase) exactly to confirm HIGH-mode cleanup."
             mismatch.runModal()
             return
         }
@@ -472,6 +947,7 @@ final class AppModel: ObservableObject {
             home.stopAccessingSecurityScopedResource()
             await wait(until: earliestResultDate)
             historyStore.record(cleanupResult, mode: mode)
+            cleanupHistory = historyStore.recentCleanupTotals(limit: 7)
             result = cleanupResult
             warnings += cleanupResult.warnings
             activityItem = ""
@@ -517,6 +993,33 @@ final class AppModel: ObservableObject {
             defaultSelected: defaultSelected,
             operation: operation ?? .recycle([]),
             currentFootprint: size
+        )
+    }
+
+    private func demoStorageBalance(for mode: CleanupMode) -> StorageBalance {
+        let gigabyte: Int64 = 1_000_000_000
+        let total = 512 * gigabyte
+        let physicalFree: Int64
+        let purgeable: Int64
+        switch mode {
+        case .low:
+            physicalFree = 96 * gigabyte
+            purgeable = 9 * gigabyte
+        case .mid:
+            physicalFree = 74 * gigabyte
+            purgeable = 14 * gigabyte
+        case .high:
+            physicalFree = 42 * gigabyte
+            purgeable = 18 * gigabyte
+        case .leftovers:
+            physicalFree = 58 * gigabyte
+            purgeable = 12 * gigabyte
+        }
+        return StorageBalance(
+            totalCapacity: total,
+            physicalFree: physicalFree,
+            availableForImportant: physicalFree + purgeable,
+            availableForOpportunistic: physicalFree + purgeable + (6 * gigabyte)
         )
     }
 
@@ -573,7 +1076,7 @@ final class AppModel: ObservableObject {
         case .mid:
             "MID practice: adds known re-downloadable app caches while still preserving the soul (personal files)."
         case .high:
-            "HIGH practice: developer and package caches are shown unchecked so you can inspect the higher-caution path. True focus requires typing DELETE."
+            "HIGH practice: high-value developer, package, sandbox, and app caches are selected for review. True focus requires typing DELETE."
         case .leftovers:
             "APPLICATION LEFTOVERS practice: possible inactive branches start unchecked and would be swept to Trash, not permanently lost."
         case .complete:
@@ -623,7 +1126,7 @@ final class AppModel: ObservableObject {
         let trashCount = selected.filter(isRecycle).count
         let base = "\(selected.count) selected action(s), totaling \(amount.fileSizeText): \(directCount) direct removal and \(trashCount) moved to Trash. Every path and safety condition is checked again."
         if selectedMode == .high {
-            return base + "\n\nStop active builds, package managers, and development servers first. HIGH may remove developer caches and build artifacts. Projects and source files are excluded, but rebuilding may take longer afterward."
+            return base + "\n\nStop active builds, package managers, and development servers first. HIGH may remove developer caches, package caches, and temporary app cache files. Projects, source files, personal files, and system components are excluded, but rebuilding may take longer afterward."
         }
         if selectedMode == .leftovers {
             return base + "\n\nItems remain recoverable in Trash."
@@ -776,13 +1279,18 @@ final class AppModel: ObservableObject {
         runningBundleIDs: Set<String>
     ) -> Bool {
         let bundleID = candidate.label.lowercased()
-        guard isBundleIdentifier(bundleID), !bundleID.hasPrefix("com.apple.") else { return false }
+        let candidateBundleID = candidate.bundleID ?? bundleID
+        let normalizedBundleID = candidateBundleID.lowercased()
+        guard isBundleIdentifier(normalizedBundleID),
+              !normalizedBundleID.hasPrefix("com.apple."),
+              !normalizedBundleID.hasPrefix("org.webkit.") else { return false }
         let isRunning = runningBundleIDs.contains { runningID in
             let running = runningID.lowercased()
-            return running == bundleID || running.hasPrefix(bundleID + ".")
+            return running == normalizedBundleID || running.hasPrefix(normalizedBundleID + ".")
         }
         guard !isRunning else { return false }
-        return NSWorkspace.shared.urlsForApplications(withBundleIdentifier: bundleID).isEmpty
+        return NSWorkspace.shared.urlsForApplications(withBundleIdentifier: candidateBundleID).isEmpty
+            && NSWorkspace.shared.urlsForApplications(withBundleIdentifier: normalizedBundleID).isEmpty
     }
 
     private func isBundleIdentifier(_ value: String) -> Bool {
@@ -866,7 +1374,7 @@ final class AppModel: ObservableObject {
         case "high-review":
             selectedMode = .high
             candidates = [
-                sample("baseline", "Old caches and logs", "2,106 items • Older than 7 days", 2_420_000_000, .safe, true),
+                sample("baseline", "Old caches and logs", "2,106 items • Older than 14 days", 2_420_000_000, .safe, true),
                 sample("derived", "Xcode DerivedData", "Build products and indexes; source stays untouched", 8_740_000_000, .confirm, true),
                 sample("npm", "npm package cache", "Re-downloadable package data", 1_120_000_000, .confirm, true),
             ]
@@ -885,13 +1393,35 @@ final class AppModel: ObservableObject {
         case "result":
             selectedMode = .mid
             result = CleanupResult(removedBytes: 2_856_000_000, removedItems: 1_502, skippedItems: 3, warnings: [])
+            cleanupHistory = [420_000_000, 980_000_000, 1_640_000_000, 2_856_000_000]
+            phase = .cleanupComplete
+        case "trash-result":
+            selectedMode = .leftovers
+            result = CleanupResult(
+                removedBytes: 0,
+                recycledBytes: 860_000_000,
+                removedItems: 0,
+                recycledItems: 6,
+                skippedItems: 1,
+                warnings: []
+            )
+            cleanupHistory = [420_000_000, 980_000_000, 1_640_000_000]
             phase = .cleanupComplete
         default:
             break
         }
+        if !candidates.isEmpty {
+            let rawCandidates = candidates
+            installScoredCandidates(rawCandidates, mode: selectedMode)
+            if storageBalance == nil {
+                storageBalance = demoStorageBalance(for: selectedMode)
+            }
+        }
         if !candidates.isEmpty && selectedCandidateIDs.isEmpty {
             selectedCandidateIDs = Set(candidates.filter(\.defaultSelected).map(\.id))
             updateReviewPhase()
+        } else {
+            refreshSelectionMetrics()
         }
     }
 

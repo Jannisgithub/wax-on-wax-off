@@ -14,11 +14,11 @@ The App Store target is a Swift 6 SwiftUI app. It is sandboxed, uses only Apple 
 ## Cleanup modes
 
 - `LOW`: old user caches, logs, and crash reports with a 30-day rule.
-- `MID`: LOW plus known re-downloadable app caches with a 14-day rule, including closed-app Chrome and Spotify disk caches while preserving profiles and persistent storage.
-- `HIGH`: MID plus developer/package caches and closed-app render caches. HIGH-only findings start unchecked, and the app recommends MID when the additional immediate cleanup is under 1 GB. Applying HIGH requires typing `DELETE`.
+- `MID`: LOW plus expanded closed-app browser, media, and communication caches with a 14-day rule while preserving profiles and persistent storage.
+- `HIGH`: MID plus reviewed developer/package caches, third-party sandbox cache/log/temp files, and closed-app render caches. HIGH ranks candidates by reclaim value, keeps uncertain tool data out of smart selection, and recommends MID when the additional immediate cleanup is under 1 GB. Applying HIGH requires typing `DELETE`.
 - `APPLICATION LEFTOVERS`: inactive application data that no longer matches an installed app. Nothing is preselected and selected items move to Trash.
 
-HIGH is limited to documented cache locations inside the approved Home folder. Personal folders such as Downloads, Desktop, Documents, Pictures, Movies, and Music are not scanned. Project folders, device backups, Xcode archives/runtimes, AI models, Docker data, Trash, Time Machine snapshots, personal files, and protected system locations are not shown as cleanup issues.
+HIGH is limited to documented cache and temporary locations inside the approved Home folder. Personal folders such as Downloads, Desktop, Documents, Pictures, Movies, and Music are not scanned. Project folders, device backups, Xcode archives/runtimes, language packs, universal binaries, Rosetta files, Siri or Apple Intelligence assets, AI model libraries, Docker data, Trash, Time Machine snapshots, personal files, app bundles, and protected system locations are never automatic cleanup issues. Large backups, archives, simulator data, Docker data, and tool-managed environments may appear as manual storage insights with a direct Finder or Storage Settings action.
 
 The app keeps a local cleanup receipt per candidate and shows how much of a previous direct cleanup remains reclaimed. Results distinguish direct removal from items moved to Trash and show the system-reported available-space change. Cleanup history contains aggregate sizes and hashed candidate IDs, not file contents or file lists.
 
